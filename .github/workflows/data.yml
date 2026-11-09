@@ -1,0 +1,138 @@
+name: Data pipeline
+
+# Fetch sources, enrich, build tiles and publish to Cloudflare.
+on:
+  schedule:
+    - cron: "23 18 * * 0" # weekly
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why this run was started
+        required: false
+        default: manual
+      skip_upload:
+        description: Build only, don't publish
+        type: boolean
+        default: false
+
+concurrency:
+  group: data-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TIPPECANOE_VERSION: "2.79.0"
+  TIPPECANOE_SHA: 68ab8dcc229f95b8b25877697d5e8d66783af503
+  R2_BUCKET: trees-data
+  D1_DATABASE: trees
+  # Only publish from main; runs on other branches build and stop.
+  PUBLISH: ${{ github.ref == 'refs/heads/main' && github.event.inputs.skip_upload != 'true' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+      - run: pip install --require-hashes -r pipeline/requirements.lock
+
+      - name: Cache tippecanoe
+        id: tippecanoe
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/tippecanoe
+          key: tippecanoe-${{ env.TIPPECANOE_SHA }}-${{ runner.os }}
+      - name: Build tippecanoe
+        if: steps.tippecanoe.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libsqlite3-dev zlib1g-dev
+          git clone --depth 1 --branch "$TIPPECANOE_VERSION" https://github.com/felt/tippecanoe.git /tmp/tc
+          test "$(git -C /tmp/tc rev-parse HEAD)" = "$TIPPECANOE_SHA"
+          make -C /tmp/tc -j"$(nproc)"
+          mkdir -p ~/tippecanoe && cp /tmp/tc/tippecanoe /tmp/tc/tile-join ~/tippecanoe/
+      - run: echo "$HOME/tippecanoe" >> "$GITHUB_PATH"
+
+      - name: Fetch sources
+        env:
+          DATAGOVSG_API_KEY: ${{ secrets.DATAGOVSG_API_KEY }}
+        run: python -m pipeline.fetch all
+
+      - name: Build
+        run: python -m pipeline.build
+
+      - name: Build vector tiles
+        run: |
+          tippecanoe -o build/out/trees.pmtiles --force -P \
+            -l trees -n "TreeNerd" -A "Trees.sg © NParks" \
+            -Z10 -z16 -B15 -r2 \
+            --drop-densest-as-needed --extend-zooms-if-still-dropping \
+            build/out/trees.geojsonl
+          ls -lh build/out
+
+      - name: Summary
+        env:
+          REASON: ${{ github.event.inputs.reason || github.event_name }}
+        run: |
+          {
+            echo "### TreeNerd data build"
+            echo '```json'
+            cat build/out/meta.json
+            echo '```'
+            printf 'Reason: %s\n' "${REASON:0:200}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-summary
+          path: build/out/meta.json
+          retention-days: 14
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: env.PUBLISH == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: env.PUBLISH == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Publish files
+        if: env.PUBLISH == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          put() { npx wrangler r2 object put "$R2_BUCKET/$1" --file "build/out/$2" --content-type "$3" --remote; }
+          put trees.pmtiles trees.pmtiles application/vnd.pmtiles
+          put search.json search.json application/json
+          put species.json species.json application/json
+          put meta.json meta.json application/json
+          put trees.csv.gz trees.csv.gz application/gzip
+          put "snapshots/$(date -u +%F)/trees.csv.gz" trees.csv.gz application/gzip
+
+      - name: Load database
+        if: env.PUBLISH == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          for f in build/out/d1/*.sql; do
+            echo "::group::$(basename "$f")"
+            for attempt in 1 2 3; do
+              npx wrangler d1 execute "$D1_DATABASE" --remote --yes --file "$f" > /dev/null && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep $((attempt * 15))
+            done
+            echo "::endgroup::"
+          done
+          npx wrangler d1 execute "$D1_DATABASE" --remote --json --command \
+            "SELECT count(*) AS trees FROM trees" | grep -o '"trees": *[0-9]*'

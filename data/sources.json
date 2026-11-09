@@ -1,0 +1,276 @@
+{
+  "$comment": "Upstream data sources used by the TreeNerd pipeline.",
+  "arcgis": {
+    "base": "https://services6.arcgis.com/s5gdswleLl0QthYa/arcgis/rest/services",
+    "attribution": "Trees.sg © National Parks Board",
+    "layers": {
+      "trees": {
+        "path": "TreesSG_TreeInformation_All/FeatureServer/0",
+        "pageSize": 1000,
+        "expectedCount": 891898,
+        "outFields": [
+          "OBJECTID",
+          "Public_treeid",
+          "SPCS_CD",
+          "SPSC_NM",
+          "COMMON_NM",
+          "GRTH_SIZE",
+          "Girth",
+          "SIZE",
+          "HEIGHT",
+          "AGE",
+          "Type",
+          "GIS_Layer",
+          "DatePlanted",
+          "DESCRIPTION",
+          "UserKeywords",
+          "incorrect",
+          "last_edited_date"
+        ],
+        "neverRequest": [
+          "Name",
+          "Email",
+          "created_user",
+          "last_edited_user"
+        ]
+      },
+      "species": {
+        "path": "TreesSG_TreeSpecies/FeatureServer/2",
+        "pageSize": 2000,
+        "outFields": [
+          "*"
+        ]
+      },
+      "carbon": {
+        "path": "TreesSG_TreeSpecies/FeatureServer/3",
+        "pageSize": 2000,
+        "outFields": [
+          "*"
+        ]
+      },
+      "speciesLookup": {
+        "path": "TreesSG_TreeSpecies/FeatureServer/1",
+        "pageSize": 2000,
+        "outFields": [
+          "*"
+        ]
+      },
+      "clusters": {
+        "path": "TreesSG_TreesSummary/FeatureServer/0",
+        "pageSize": 2000,
+        "outFields": [
+          "SPCS_CD",
+          "COMMON_NM",
+          "COUNT_SPCS_CD"
+        ]
+      },
+      "heritageRoads": {
+        "path": "TreesSG_HeritageRoads_New/FeatureServer/0",
+        "pageSize": 2000,
+        "outFields": [
+          "ROAD_NM",
+          "DESCRIPT"
+        ]
+      }
+    }
+  },
+  "datagovsg": {
+    "pollDownload": "https://api-open.data.gov.sg/v1/public/api/datasets/{id}/poll-download",
+    "metadata": "https://api-production.data.gov.sg/v2/public/api/datasets/{id}/metadata",
+    "attribution": "Contains information from data.gov.sg accessed under the Singapore Open Data Licence",
+    "datasets": {
+      "subzones_mp2019": {
+        "id": "d_8594ae9ff96d0c708bc2af633048edfb",
+        "required": true,
+        "fields": [
+          "SUBZONE_N",
+          "SUBZONE_C",
+          "PLN_AREA_N",
+          "PLN_AREA_C",
+          "REGION_N"
+        ]
+      },
+      "planning_areas_mp2025": {
+        "id": "d_2cc750190544007400b2cfd5d7f53209",
+        "required": true,
+        "fields": [
+          "PLN_AREA_N",
+          "PLN_AREA_C",
+          "REGION_N"
+        ]
+      },
+      "parks_nature_reserves": {
+        "id": "d_77d7ec97be83d44f61b85454f844382f",
+        "required": true,
+        "fields": [
+          "NAME",
+          "L_CODE",
+          "N_RESERVE"
+        ]
+      },
+      "heritage_trees": {
+        "id": "d_644ff187b6d14d6316f47284a4a6c81f",
+        "required": true,
+        "fields": [
+          "NAME",
+          "DESCRIPTION",
+          "HT",
+          "HYPERLINK"
+        ]
+      },
+      "heritage_road_buffers": {
+        "id": "d_9233bdb05de067c3b3db21b836467a6a",
+        "required": true,
+        "fields": [
+          "ROAD_NM",
+          "DESCRIPT"
+        ]
+      },
+      "tree_conservation_areas": {
+        "id": "d_52b9eabe398353bd6acd9aee15b13f72",
+        "required": true,
+        "fields": [
+          "NAME",
+          "REGION",
+          "MORE_INFO"
+        ]
+      },
+      "parks_points": {
+        "id": "d_0542d48f0991541706b58059381a6eca",
+        "required": false,
+        "fields": [
+          "NAME"
+        ]
+      },
+      "park_connector_loop": {
+        "id": "d_a69ef89737379f231d2ae93fd1c5707f",
+        "required": false,
+        "fields": [
+          "PARK",
+          "PCN_LOOP"
+        ]
+      },
+      "nparks_tracks": {
+        "id": "d_306cc1018cb733346681883ee6d73054",
+        "required": false,
+        "fields": [
+          "PARK",
+          "TYPE",
+          "PATH_WIDTH",
+          "ALLOW_WALKING",
+          "ALLOW_CYCLING",
+          "ALLOW_WHEELING",
+          "ALLOW_PMD"
+        ]
+      },
+      "nature_ways": {
+        "id": "d_af948e3f29cd12bc8b0caea19ae68286",
+        "required": false,
+        "fields": [
+          "NAME"
+        ]
+      },
+      "park_facilities": {
+        "id": "d_14d807e20158338fd578c2913953516e",
+        "required": false,
+        "fields": [
+          "NAME",
+          "CLASS"
+        ]
+      },
+      "cnr_hiking_trails": {
+        "id": "d_84e6db6c43ffb8b17803334ec2b5c95d",
+        "required": false
+      },
+      "land_use_mp2025": {
+        "id": "d_a8c3546b26712e35021f3a681d0353ae",
+        "required": false,
+        "fields": [
+          "LU_DESC"
+        ]
+      },
+      "electoral_2025": {
+        "id": "d_7ddf956dfc1c59080bf95bba1c58a5d2",
+        "required": false,
+        "fields": [
+          "ED_DESC",
+          "ED_DESC_FU"
+        ]
+      },
+      "population_subzone_2020": {
+        "id": "d_d95ae740c0f8961a0b10435836660ce0",
+        "required": false,
+        "format": "CSV"
+      },
+      "major_roads_sla": {
+        "id": "d_10480c0b59e65663dfae1028ff4aa8bb",
+        "required": false,
+        "note": "Major roads + expressways only (262 names); fallback for road names",
+        "filter": {
+          "FOLDERPATH": [
+            "Layers/Major_Road",
+            "Layers/Expressway",
+            "Layers/Expressway_Sliproad"
+          ]
+        },
+        "fallbackOnly": true
+      }
+    },
+    "realtimeApis": {
+      "rainfall": "d_6580738cdd7db79374ed3152159fbd69",
+      "wind_speed": "d_7677738484067741bf3b56ab5d69c7e9",
+      "lightning": "d_08238953fe0f6dd13f10714ebfbcb9f9",
+      "forecast_2h": "d_3f9e064e25005b0e42969944ccaf2e7a",
+      "flood_alerts": "d_f1404e08587ce555b9ea3f565e2eb9a3"
+    }
+  },
+  "roads": {
+    "primary": {
+      "name": "OpenStreetMap",
+      "urls": [
+        "https://download.openstreetmap.fr/extracts/asia/singapore.osm.pbf",
+        "https://download.geofabrik.de/asia/malaysia-singapore-brunei-latest.osm.pbf"
+      ],
+      "bbox": [
+        103.59,
+        1.15,
+        104.1,
+        1.48
+      ],
+      "highwayTypes": [
+        "motorway",
+        "motorway_link",
+        "trunk",
+        "trunk_link",
+        "primary",
+        "primary_link",
+        "secondary",
+        "secondary_link",
+        "tertiary",
+        "tertiary_link",
+        "unclassified",
+        "residential",
+        "living_street",
+        "service",
+        "road",
+        "pedestrian"
+      ],
+      "attribution": "© OpenStreetMap contributors (ODbL)",
+      "licenceNote": "Published tree->road table is an ODbL derivative database"
+    },
+    "alternative": {
+      "name": "LTA DataMall Road Section Line",
+      "url": "https://datamall.lta.gov.sg",
+      "note": "Needs a free API key; check the terms"
+    },
+    "validation": {
+      "name": "OneMap Search",
+      "url": "https://www.onemap.gov.sg/api/common/elastic/search?searchVal={q}&returnGeom=Y&getAddrDetails=Y&pageNum=1"
+    }
+  },
+  "joins": {
+    "roadMaxDistanceM": 30,
+    "pcnMaxDistanceM": 15,
+    "heritageMatchM": 15
+  }
+}

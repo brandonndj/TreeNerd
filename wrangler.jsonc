@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Cloudflare's internal Worker name. Changing it creates a new Worker, so it stays as is.
+  "name": "trees-sg",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-12-01",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/data/*"]
+  },
+  // Only serve on the custom domain; no *.workers.dev or preview hostnames.
+  "workers_dev": false,
+  "preview_urls": false,
+  "d1_databases": [{ "binding": "DB", "database_name": "trees" }],
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "trees-data" }],
+  // Per-IP limit on /api/* requests.
+  "ratelimits": [{ "name": "API_LIMIT", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } }],
+  "triggers": { "crons": ["17 */6 * * *"] },
+  "vars": {
+    "GITHUB_REPO": "brandonndj/trees",
+    "GITHUB_WORKFLOW": "data.yml",
+    "GITHUB_REF": "main",
+    "ARCGIS_TREES_LAYER": "https://services6.arcgis.com/s5gdswleLl0QthYa/arcgis/rest/services/TreesSG_TreeInformation_All/FeatureServer/0"
+  },
+  "observability": { "enabled": true },
+  "placement": { "mode": "smart" }
+}
