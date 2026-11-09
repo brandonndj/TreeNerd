@@ -23,24 +23,22 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 const catColor = (key) => css(`--c-${key}`);
 const isPhone = () => innerWidth <= 720;
 
-// ------------------------------------------------------------------ theme (auto / light / dark)
+// ------------------------------------------------------------------ theme: follows the device until toggled
+// "auto" = follow the device. Clicking switches to the opposite of what's showing; switching back to
+// what the device uses returns to "auto", so later device changes are followed again.
 const svg = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${d}</svg>`;
-const THEME_ICON = {
-  auto: svg('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>'),
-  light: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
-  dark: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
-};
-const THEME_NAME = { auto: "Automatic", light: "Light", dark: "Dark" };
+const SUN = svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>');
+const MOON = svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>');
 const systemDark = matchMedia("(prefers-color-scheme: dark)");
 let theme = (() => { try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; } })();
-if (!THEME_ICON[theme]) theme = "auto";
+if (!["auto", "light", "dark"].includes(theme)) theme = "auto";
 const dark = () => theme === "dark" || (theme === "auto" && systemDark.matches);
 function applyThemeAttr() {
   if (theme === "auto") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
   const btn = $("#theme");
-  btn.innerHTML = THEME_ICON[theme];
-  btn.title = `Theme: ${THEME_NAME[theme]}`;
+  btn.innerHTML = dark() ? SUN : MOON; // shows what a tap switches to
+  btn.title = dark() ? "Switch to light mode" : "Switch to dark mode";
   btn.setAttribute("aria-label", btn.title);
   for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = dark() ? "#0f1411" : "#f6f7f4";
 }
@@ -169,10 +167,10 @@ function refreshMapTheme() {
   }
 }
 $("#theme").addEventListener("click", () => {
-  theme = { auto: "light", light: "dark", dark: "auto" }[theme];
+  const next = dark() ? "light" : "dark";
+  theme = next === (systemDark.matches ? "dark" : "light") ? "auto" : next;
   try { theme === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", theme); } catch { /* private mode */ }
   refreshMapTheme();
-  toast(`Theme: ${THEME_NAME[theme]}${theme === "auto" ? " (follows your device)" : ""}`, 1800);
 });
 systemDark.addEventListener("change", () => theme === "auto" && refreshMapTheme());
 
