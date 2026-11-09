@@ -5,13 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>TreeNerd</title>
   <meta name="description" content="Explore every one of Singapore's ~890,000 trees. Search by road, park, area or species.">
-  <meta name="theme-color" content="#1f3d2b">
+  <meta name="theme-color" content="#f6f7f4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1411" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="TreeNerd">
+  <meta name="format-detection" content="telephone=no">
   <link rel="canonical" href="https://treenerd.fyi/">
   <meta property="og:title" content="TreeNerd">
   <meta property="og:description" content="Explore every tree in Singapore by road, park, area or species.">
   <meta property="og:url" content="https://treenerd.fyi/">
   <meta property="og:type" content="website">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/vendor/maplibre-gl.css">
   <link rel="stylesheet" href="/app.css">
@@ -23,22 +30,24 @@
     <div class="search" role="combobox" aria-haspopup="listbox" aria-owns="results" aria-expanded="false">
       <span class="search-icon" aria-hidden="true">🔎</span>
       <input id="q" type="search" autocomplete="off" spellcheck="false" maxlength="100"
-             placeholder="Search a road, park, area or tree species…" aria-label="Search" aria-controls="results">
+             placeholder="Road, park, postal code, species…" aria-label="Search" aria-controls="results">
       <button id="clear" class="icon-btn" hidden aria-label="Clear search">✕</button>
       <ul id="results" role="listbox" hidden></ul>
     </div>
-    <button id="near" class="pill" title="Trees around me">📍 <span>Near me</span></button>
+    <button id="near" class="pill" title="Trees around me" aria-label="Trees near me">📍 <span>Near me</span></button>
+    <button id="theme" class="pill" title="Theme: automatic" aria-label="Theme: automatic"></button>
   </header>
 
   <aside id="panel" class="panel" hidden aria-live="polite">
-    <div class="panel-grip" aria-hidden="true"></div>
+    <div class="sheet-handle" id="handle" role="button" tabindex="0" aria-label="Resize panel"></div>
     <button id="close" class="icon-btn panel-close" aria-label="Close panel">✕</button>
     <div id="panel-body"></div>
   </aside>
 
   <section class="legend" id="legend" aria-label="Tree categories">
-    <div class="legend-title">Show <span id="total" class="muted"></span></div>
+    <button class="legend-title" id="legend-toggle" aria-expanded="true">Show <span id="total" class="muted"></span></button>
     <div id="legend-items"></div>
+    <div class="legend-foot"><span id="updated"></span><button id="about">About</button></div>
   </section>
 
   <div id="hover" class="hover" hidden></div>

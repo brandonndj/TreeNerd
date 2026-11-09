@@ -9,7 +9,8 @@ TreeNerd maps Singapore's ~890,000 trees and makes them searchable by **road**, 
 - **Search that forgives typos and abbreviations**: "orchad rd", "upp thomson", "jln kayu". It also matches species by common, scientific and Chinese/Malay names.
 - **Place summaries**: tree and species counts, share of native species, estimated carbon, heritage trees, top species (tap one to filter the map) and a CSV download.
 - **Tree cards**: species, girth, height, age, estimated carbon, and which road, park, area and constituency the tree is in. Heritage trees include their story.
-- **Trees near me**, shareable links, and a layout that works on mobile.
+- **Address search**: postal codes, HDB blocks and building names (via OneMap) show the trees around that address.
+- **Trees near me**, shareable links, light/dark/automatic themes, and a mobile layout with a resizable bottom sheet. It can be added to the home screen.
 
 ## How it works
 

@@ -4,6 +4,7 @@ const fmt = new Intl.NumberFormat("en-SG");
 /** Only allow https links from data into href attributes. */
 const safeUrl = (u) => { try { const x = new URL(u); return x.protocol === "https:" ? x.href : null; } catch { return null; } };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtDate = (s) => { const d = new Date(s); return isNaN(d) ? "" : d.toLocaleDateString("en-SG", { day: "numeric", month: "short", year: "numeric" }); };
 
 const CATS = [
   { code: 1, key: "street", label: "Street trees" },
@@ -16,21 +17,45 @@ const CATS = [
 ];
 const KIND_LABEL = {
   road: "Road", park: "Park", subzone: "Subzone", planning_area: "Planning area", pcn: "Park connector",
-  constituency: "Constituency", heritage_road: "Heritage road", species: "Species",
+  constituency: "Constituency", heritage_road: "Heritage road", species: "Species", address: "Address",
 };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const catColor = (key) => css(`--c-${key}`);
-const dark = () => matchMedia("(prefers-color-scheme: dark)").matches;
+const isPhone = () => innerWidth <= 720;
+
+// ------------------------------------------------------------------ theme (auto / light / dark)
+const svg = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">${d}</svg>`;
+const THEME_ICON = {
+  auto: svg('<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>'),
+  light: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  dark: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
+};
+const THEME_NAME = { auto: "Automatic", light: "Light", dark: "Dark" };
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+let theme = (() => { try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; } })();
+if (!THEME_ICON[theme]) theme = "auto";
+const dark = () => theme === "dark" || (theme === "auto" && systemDark.matches);
+function applyThemeAttr() {
+  if (theme === "auto") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  const btn = $("#theme");
+  btn.innerHTML = THEME_ICON[theme];
+  btn.title = `Theme: ${THEME_NAME[theme]}`;
+  btn.setAttribute("aria-label", btn.title);
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) m.content = dark() ? "#0f1411" : "#f6f7f4";
+}
+applyThemeAttr();
 
 const state = {
   cats: new Set(CATS.map((c) => c.code)),
   highlight: null,        // maplibre expression selecting highlighted trees
   place: null, species: null, tree: null,
-  meta: null, speciesDict: {},
+  meta: null, speciesDict: {}, sheet: "half",
 };
 
 async function api(path) {
   const r = await fetch(path);
+  if (r.status === 429) throw new Error("Too many requests. Please try again in a minute.");
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r.json();
 }
@@ -47,45 +72,48 @@ const INITIAL_VIEW = location.hash.includes("map=");
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
-const basemap = (style) => ({
-  type: "raster", tileSize: 256, minzoom: 11, maxzoom: 19,
-  tiles: [`https://www.onemap.gov.sg/maps/tiles/${style}/{z}/{x}/{y}.png`],
-  bounds: [103.596, 1.1443, 104.1, 1.4835],
-  attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:16px;width:16px;vertical-align:-3px"/> <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>',
-});
-
+const tileUrl = (style) => `https://www.onemap.gov.sg/maps/tiles/${style}/{z}/{x}/{y}.png`;
 const map = new maplibregl.Map({
   container: "map",
   hash: "map",
   center: [103.8198, 1.3521], zoom: 11.3, minZoom: 10.5, maxZoom: 20,
   maxBounds: [[103.5, 1.1], [104.2, 1.53]],
   attributionControl: false,
+  dragRotate: false, pitchWithRotate: false, touchPitch: false,
   style: {
     version: 8,
-    sources: { base: basemap(dark() ? "Night" : "Grey") },
+    sources: {
+      base: {
+        type: "raster", tileSize: 256, minzoom: 11, maxzoom: 19, tiles: [tileUrl(dark() ? "Night" : "Grey")],
+        bounds: [103.596, 1.1443, 104.1, 1.4835],
+        attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" style="height:16px;width:16px;vertical-align:-3px"/> <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>',
+      },
+    },
     layers: [
       { id: "bg", type: "background", paint: { "background-color": dark() ? "#0f1411" : "#eef0ea" } },
       { id: "base", type: "raster", source: "base", paint: { "raster-opacity": dark() ? 0.8 : 0.9 } },
     ],
   },
 });
+map.touchZoomRotate.disableRotation();
 map.addControl(new maplibregl.AttributionControl({
   compact: true,
   customAttribution: 'Trees: <a href="https://treessg.nparks.gov.sg" target="_blank" rel="noopener noreferrer">Trees.sg</a> © NParks · Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> · data.gov.sg',
 }), "bottom-right");
-map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
-map.addControl(new maplibregl.GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: false }), "bottom-right");
+// Zoom buttons only where there's no pinch-to-zoom.
+if (!matchMedia("(pointer: coarse)").matches) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
 function colorExpr() {
   return ["match", ["get", "c"], ...CATS.flatMap((c) => [c.code, catColor(c.key)]), catColor("other")];
 }
 function radiusExpr() {
   const g = ["coalesce", ["get", "g"], 40]; // girth in cm
+  const touch = matchMedia("(pointer: coarse)").matches ? 1.3 : 1; // slightly bigger dots for fingers
   return ["interpolate", ["linear"], ["zoom"],
     11, ["case", ["==", ["get", "c"], 6], 2.5, 0.8],
-    14, ["case", ["==", ["get", "c"], 6], 5, 2],
-    17, ["+", 2.5, ["/", ["min", g, 400], 45]],
-    20, ["+", 6, ["/", ["min", g, 400], 14]]];
+    14, ["case", ["==", ["get", "c"], 6], 5, 2 * touch],
+    17, ["*", touch, ["+", 2.5, ["/", ["min", g, 400], 45]]],
+    20, ["*", touch, ["+", 6, ["/", ["min", g, 400], 14]]]];
 }
 function filterExpr() {
   return ["in", ["get", "c"], ["literal", [...state.cats]]];
@@ -96,6 +124,11 @@ function opacityExpr() {
 }
 
 map.on("load", async () => {
+  // start with the attribution collapsed behind its (i) button
+  const attrib = document.querySelector(".maplibregl-ctrl-attrib");
+  attrib?.classList.remove("maplibregl-compact-show");
+  attrib?.removeAttribute("open");
+
   const meta = await api("/api/meta").catch(() => null);
   state.meta = meta;
   const v = encodeURIComponent(meta?.built_at || "dev");
@@ -121,6 +154,28 @@ map.on("load", async () => {
   restoreFromUrl();
 });
 
+function refreshMapTheme() {
+  applyThemeAttr();
+  if (!map.getLayer("bg")) return;
+  map.getSource("base").setTiles([tileUrl(dark() ? "Night" : "Grey")]);
+  map.setPaintProperty("bg", "background-color", dark() ? "#0f1411" : "#eef0ea");
+  map.setPaintProperty("base", "raster-opacity", dark() ? 0.8 : 0.9);
+  if (map.getLayer("trees")) {
+    map.setPaintProperty("trees", "circle-color", colorExpr());
+    map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
+    map.setPaintProperty("sel", "circle-stroke-color", css("--accent"));
+    map.setPaintProperty("near", "line-color", css("--accent"));
+    buildLegendItems();
+  }
+}
+$("#theme").addEventListener("click", () => {
+  theme = { auto: "light", light: "dark", dark: "auto" }[theme];
+  try { theme === "auto" ? localStorage.removeItem("theme") : localStorage.setItem("theme", theme); } catch { /* private mode */ }
+  refreshMapTheme();
+  toast(`Theme: ${THEME_NAME[theme]}${theme === "auto" ? " (follows your device)" : ""}`, 1800);
+});
+systemDark.addEventListener("change", () => theme === "auto" && refreshMapTheme());
+
 function setHighlight(expr) {
   state.highlight = expr;
   if (!map.getLayer("trees")) return;
@@ -135,13 +190,15 @@ function fitBbox(b, maxZoom = 17) {
   map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: panelPadding(), maxZoom, duration: 900 });
 }
 function panelPadding() {
-  const mobile = innerWidth <= 720;
-  return mobile ? { top: 80, bottom: innerHeight * 0.6, left: 30, right: 30 } : { top: 90, bottom: 40, left: 430, right: 60 };
+  if (!isPhone()) return { top: 90, bottom: 40, left: 430, right: 60 };
+  const sheet = panel.hidden ? 0 : panel.getBoundingClientRect().height;
+  return { top: 80, bottom: Math.min(sheet + 20, innerHeight - 160), left: 30, right: 30 };
 }
 
 function wireMapEvents() {
   const hover = $("#hover");
   map.on("mousemove", "trees", (e) => {
+    if (matchMedia("(pointer: coarse)").matches) return;
     const f = e.features[0];
     map.getCanvas().style.cursor = "pointer";
     const s = state.speciesDict[f.properties.s];
@@ -152,33 +209,40 @@ function wireMapEvents() {
     hover.hidden = false;
   });
   map.on("mouseleave", "trees", () => { map.getCanvas().style.cursor = ""; hover.hidden = true; });
-  map.on("click", "trees", (e) => {
-    const f = e.features.sort((a, b) => (b.properties.g || 0) - (a.properties.g || 0))[0];
-    openTree(f.properties.id);
-  });
   map.on("click", (e) => {
-    if (!map.queryRenderedFeatures(e.point, { layers: ["trees"] }).length && innerWidth > 720 && !state.place && !state.species) closePanel();
+    // generous hit area so small dots are easy to tap
+    const r = matchMedia("(pointer: coarse)").matches ? 14 : 6;
+    const feats = map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ["trees"] });
+    if (feats.length) {
+      const f = feats.sort((a, b) => (b.properties.g || 0) - (a.properties.g || 0))[0];
+      return openTree(f.properties.id, true, true);
+    }
+    if (isPhone() && !panel.hidden) setSheet("peek");
+    else if (!isPhone() && !state.place && !state.species) closePanel();
   });
 }
 
 // ------------------------------------------------------------------ legend
-function buildLegend() {
+function buildLegendItems() {
   const counts = state.meta?.category_counts || {};
-  $("#total").textContent = state.meta?.tree_count ? `· ${fmt.format(state.meta.tree_count)} trees` : "";
   $("#legend-items").innerHTML = CATS.filter((c) => counts[c.key] || !state.meta).map((c) => `
-    <label><input type="checkbox" data-c="${c.code}" checked>
+    <label><input type="checkbox" data-c="${c.code}" ${state.cats.has(c.code) ? "checked" : ""}>
       <span class="dot" style="background:${catColor(c.key)}"></span>${c.label}
       <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("");
+}
+function buildLegend() {
+  $("#total").textContent = state.meta?.tree_count ? `· ${fmt.format(state.meta.tree_count)} trees` : "";
+  $("#updated").textContent = state.meta?.built_at ? `Updated ${fmtDate(state.meta.built_at)}` : "";
+  buildLegendItems();
   $("#legend-items").addEventListener("change", (e) => {
     const c = Number(e.target.dataset.c);
     e.target.checked ? state.cats.add(c) : state.cats.delete(c);
     map.setFilter("trees", filterExpr());
   });
-  if (innerWidth <= 720) {
-    const lg = $("#legend");
-    lg.classList.add("collapsed");
-    $(".legend-title").addEventListener("click", () => lg.classList.toggle("collapsed"));
-  }
+  const lg = $("#legend"), tg = $("#legend-toggle");
+  const setCollapsed = (v) => { lg.classList.toggle("collapsed", v); tg.setAttribute("aria-expanded", String(!v)); };
+  if (isPhone()) setCollapsed(true);
+  tg.addEventListener("click", () => setCollapsed(!lg.classList.contains("collapsed")));
 }
 
 // ------------------------------------------------------------------ search
@@ -187,7 +251,7 @@ let active = -1, items = [], searchSeq = 0;
 q.addEventListener("input", () => {
   $("#clear").hidden = !q.value;
   clearTimeout(q.t);
-  q.t = setTimeout(runSearch, 120);
+  q.t = setTimeout(runSearch, 150);
 });
 q.addEventListener("keydown", (e) => {
   if (results.hidden) return;
@@ -203,42 +267,74 @@ q.addEventListener("focus", () => items.length && q.value && showResults());
 document.addEventListener("click", (e) => !e.target.closest(".search") && hideResults());
 $("#clear").addEventListener("click", () => { q.value = ""; $("#clear").hidden = true; hideResults(); q.focus(); });
 
+const looksLikeAddress = (t) => /\d/.test(t) || /^(blk|block)\b/i.test(t);
+
 async function runSearch() {
   const text = q.value.trim();
   if (text.length < 2) return hideResults();
   const seq = ++searchSeq;
-  try {
-    const d = await api(`/api/search?q=${encodeURIComponent(text)}`);
-    if (seq !== searchSeq) return;
-    items = d.results; active = -1;
-    results.innerHTML = items.length ? items.map((r) => `
+  const addressFirst = looksLikeAddress(text);
+  const geocode = () => (text.length >= 3 ? api(`/api/geocode?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }));
+  const geoP = addressFirst ? geocode() : null; // start early when it's probably an address
+  let local = { results: [] };
+  try { local = await api(`/api/search?q=${encodeURIComponent(text)}`); }
+  catch (e) { if (!addressFirst) toast(e.message); }
+  if (seq !== searchSeq) return;
+  renderResults(text, local.results, [], addressFirst);
+  // look up buildings/addresses too when local matches are thin
+  const geo = geoP ? await geoP : (local.results.length < 5 ? await geocode() : { results: [] });
+  if (seq !== searchSeq || !geo.results.length) return;
+  renderResults(text, local.results, geo.results, addressFirst);
+}
+function renderResults(text, local, addresses, addressFirst) {
+  const addr = addresses.map((a) => ({ ...a, kind: "address" }));
+  items = addressFirst ? [...addr, ...local].slice(0, 12) : [...local.slice(0, 8), ...addr].slice(0, 12);
+  active = -1;
+  results.innerHTML = items.length ? items.map((r) => r.kind === "address" ? `
       <li role="option" aria-selected="false">
-        <span class="badge">${KIND_LABEL[r.kind] || r.kind}</span>
+        <span class="badge addr">${r.postal ? "Postal" : "Address"}</span>
+        <span class="r-name">${esc(r.name)}<span class="r-alt">${esc(r.address)}</span></span></li>` : `
+      <li role="option" aria-selected="false">
+        <span class="badge">${esc(KIND_LABEL[r.kind] || r.kind)}</span>
         <span class="r-name">${esc(r.name)}${r.kind === "species" && r.alt?.[0] ? `<span class="r-alt">${esc(r.alt[0])}</span>` : ""}</span>
         <span class="r-count">${fmt.format(r.count)}</span></li>`).join("")
-      : `<li class="empty">No matches for “${esc(text)}”</li>`;
-    [...results.querySelectorAll("li[role=option]")].forEach((li, i) => li.addEventListener("click", () => choose(items[i])));
-    showResults();
-  } catch (e) { toast(`Search unavailable: ${e.message}`); }
+    : `<li class="empty">No matches for “${esc(text)}”</li>`;
+  [...results.querySelectorAll("li[role=option]")].forEach((li, i) => li.addEventListener("click", () => choose(items[i])));
+  showResults();
 }
 function showResults() { results.hidden = false; $(".search").setAttribute("aria-expanded", "true"); }
 function hideResults() { results.hidden = true; $(".search").setAttribute("aria-expanded", "false"); }
 function choose(r) {
   hideResults();
   q.value = r.name; $("#clear").hidden = false; q.blur();
-  if (r.kind === "species") openSpecies(r.slug);
+  if (r.kind === "address") nearby(r.lat, r.lng, 150, { title: r.name, sub: r.address });
+  else if (r.kind === "species") openSpecies(r.slug);
   else openPlace(r.kind, r.slug, r.bbox);
 }
 
-// ------------------------------------------------------------------ panel
-const panel = $("#panel"), body = $("#panel-body");
-function openPanel(html) {
+// ------------------------------------------------------------------ panel / bottom sheet
+const panel = $("#panel"), body = $("#panel-body"), handle = $("#handle");
+const SHEET_ORDER = ["peek", "half", "full"];
+function sheetHeight(mode) {
+  return { peek: 150, half: Math.round(innerHeight * 0.5), full: innerHeight }[mode];
+}
+function setSheet(mode) {
+  state.sheet = mode;
+  panel.style.setProperty("--sheet-h", `${sheetHeight(mode)}px`);
+  requestAnimationFrame(() => document.documentElement.style.setProperty("--sheet-offset",
+    panel.hidden ? "0px" : `${panel.getBoundingClientRect().height}px`));
+  if (mode !== "full") panel.scrollTop = 0;
+}
+function openPanel(html, { sheet } = {}) {
+  const wasHidden = panel.hidden;
   body.innerHTML = html; panel.hidden = false; panel.scrollTop = 0;
   document.body.classList.add("panel-open");
+  if (isPhone() && (wasHidden || sheet || state.sheet === "peek")) setSheet(sheet || "half");
   requestAnimationFrame(() => map.triggerRepaint()); // some GPUs leave a stale canvas under new overlays
 }
 function closePanel() {
   panel.hidden = true; document.body.classList.remove("panel-open");
+  document.documentElement.style.setProperty("--sheet-offset", "0px");
   state.place = state.species = state.tree = null;
   setHighlight(null); selectPoint(null);
   map.getSource("near")?.setData({ type: "FeatureCollection", features: [] });
@@ -246,6 +342,43 @@ function closePanel() {
 }
 $("#close").addEventListener("click", closePanel);
 document.addEventListener("keydown", (e) => e.key === "Escape" && !panel.hidden && document.activeElement !== q && closePanel());
+addEventListener("resize", () => isPhone() && !panel.hidden && setSheet(state.sheet));
+
+// drag the handle to resize; tap it to toggle half/full; flick down to close
+(() => {
+  let start = null;
+  handle.addEventListener("pointerdown", (e) => {
+    if (!isPhone()) return;
+    start = { y: e.clientY, h: panel.getBoundingClientRect().height, t: performance.now() };
+    handle.setPointerCapture(e.pointerId);
+    panel.classList.add("dragging");
+  });
+  handle.addEventListener("pointermove", (e) => {
+    if (!start) return;
+    const h = Math.max(80, Math.min(innerHeight, start.h + (start.y - e.clientY)));
+    panel.style.setProperty("--sheet-h", `${h}px`);
+  });
+  const end = (e) => {
+    if (!start) return;
+    panel.classList.remove("dragging");
+    const dy = start.y - e.clientY, dt = performance.now() - start.t, v = dy / Math.max(dt, 1);
+    const h = panel.getBoundingClientRect().height;
+    start = null;
+    if (Math.abs(dy) < 6) return setSheet(state.sheet === "full" ? "half" : "full"); // tap
+    if (v < -0.8 && state.sheet === "peek") return closePanel();                    // flick down from peek
+    if (Math.abs(v) > 0.5) {                                                           // flick: next snap in that direction
+      const i = SHEET_ORDER.indexOf(state.sheet) + (v > 0 ? 1 : -1);
+      return i < 0 ? closePanel() : setSheet(SHEET_ORDER[Math.min(i, 2)]);
+    }
+    if (h < sheetHeight("peek") - 50) return closePanel();
+    setSheet(SHEET_ORDER.reduce((a, b) => (Math.abs(sheetHeight(b) - h) < Math.abs(sheetHeight(a) - h) ? b : a)));
+  };
+  handle.addEventListener("pointerup", end);
+  handle.addEventListener("pointercancel", end);
+  handle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSheet(state.sheet === "full" ? "half" : "full"); }
+  });
+})();
 
 function setUrl(params) {
   const u = new URL(location.href);
@@ -283,7 +416,7 @@ function categoryStack(cats, total) {
 
 // ---- place (road / park / area …)
 async function openPlace(kind, slug, bbox, fly = true) {
-  openPanel(`<p class="muted">Loading…</p>`);
+  openPanel(`<p class="muted">Loading…</p>`, { sheet: "half" });
   let d;
   try { d = await api(`/api/place/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`); }
   catch (e) { return openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
@@ -297,7 +430,7 @@ async function highlightPlace(d, speciesId) {
   let expr;
   if (d.tile_key) expr = ["==", ["get", d.tile_key], d.place_id];
   else {
-    const { ids } = await api(`/api/place/${d.kind}/${encodeURIComponent(d.slug)}/ids`);
+    const { ids } = await api(`/api/place/${encodeURIComponent(d.kind)}/${encodeURIComponent(d.slug)}/ids`);
     expr = ["in", ["get", "id"], ["literal", ids]];
   }
   if (speciesId) expr = ["all", expr, ["==", ["get", "s"], speciesId]];
@@ -327,7 +460,7 @@ function renderPlace(d) {
     <ul class="list" id="tree-list"></ul>
     <div class="actions">
       <button class="btn" id="more">Show more</button>
-      <a class="btn" href="/api/place/${d.kind}/${encodeURIComponent(d.slug)}/trees.csv${state.placeSpecies ? `?species=${state.placeSpecies}` : ""}" download>⬇ CSV</a>
+      <a class="btn" href="/api/place/${encodeURIComponent(d.kind)}/${encodeURIComponent(d.slug)}/trees.csv${state.placeSpecies ? `?species=${state.placeSpecies}` : ""}" download>⬇ CSV</a>
       <button class="btn" id="share">🔗 Share</button>
     </div>`);
   $("#place-species").querySelectorAll("button.bar").forEach((b) => b.addEventListener("click", async () => {
@@ -342,11 +475,13 @@ function renderPlace(d) {
 }
 async function loadTreeList(d, offset) {
   const sp = state.placeSpecies ? `&species=${state.placeSpecies}` : "";
-  const r = await api(`/api/place/${d.kind}/${encodeURIComponent(d.slug)}/trees?limit=25&offset=${offset}${sp}`);
+  let r;
+  try { r = await api(`/api/place/${encodeURIComponent(d.kind)}/${encodeURIComponent(d.slug)}/trees?limit=25&offset=${offset}${sp}`); }
+  catch (e) { return toast(e.message); }
   const ul = $("#tree-list");
   if (!ul) return;
   ul.insertAdjacentHTML("beforeend", r.trees.map((t) => `
-    <li><button data-id="${t.id}"><span>${esc(t.common || t.scientific || "Tree")}${t.ht_no ? " 🌟" : ""}</span>
+    <li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}${t.ht_no ? " 🌟" : ""}</span>
       <span class="meta">${t.girth_m ? `${t.girth_m.toFixed(1)} m girth` : ""}${t.height_band ? ` · ${esc(t.height_band)} m` : ""}</span></button></li>`).join(""));
   ul.querySelectorAll("button:not([data-wired])").forEach((b) => {
     b.dataset.wired = 1;
@@ -358,7 +493,7 @@ async function loadTreeList(d, offset) {
 
 // ---- species
 async function openSpecies(id, fly = true) {
-  openPanel(`<p class="muted">Loading…</p>`);
+  openPanel(`<p class="muted">Loading…</p>`, { sheet: "half" });
   let s;
   try { s = await api(`/api/species/${encodeURIComponent(id)}`); }
   catch (e) { return openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
@@ -366,7 +501,7 @@ async function openSpecies(id, fly = true) {
   setUrl({ s: id });
   setHighlight(["==", ["get", "s"], s.id]);
   if (fly) map.flyTo({ center: [103.8198, 1.3521], zoom: 11.3, padding: panelPadding() });
-  const placeRows = (rows) => `<ul class="list">${rows.map((r) => `<li><button data-kind="${r.kind}" data-slug="${esc(r.slug)}">
+  const placeRows = (rows) => `<ul class="list">${rows.map((r) => `<li><button data-kind="${esc(r.kind)}" data-slug="${esc(r.slug)}">
     <span>${esc(r.name)}</span><span class="meta">${fmt.format(r.n)}</span></button></li>`).join("")}</ul>`;
   const nativeLabel = s.native === 1 ? "Native to Singapore" : s.native === 0 ? "Non-native" : null;
   openPanel(`
@@ -379,11 +514,14 @@ async function openSpecies(id, fly = true) {
       ${s.conservation_status ? `<dt>Status</dt><dd>${esc(s.conservation_status)}</dd>` : ""}
       ${s.aliases?.length ? `<dt>Also called</dt><dd>${esc(s.aliases.slice(0, 8).join(", "))}</dd>` : ""}
     </dl>
-    ${safeUrl(s.ffw_url) ? `<div class="actions"><a class="btn" href="${esc(safeUrl(s.ffw_url))}" target="_blank" rel="noopener noreferrer">Flora &amp; Fauna Web ↗</a><button class="btn" id="share">🔗 Share</button></div>` : ""}
+    <div class="actions">
+      ${safeUrl(s.ffw_url) ? `<a class="btn" href="${esc(safeUrl(s.ffw_url))}" target="_blank" rel="noopener noreferrer">Flora &amp; Fauna Web ↗</a>` : ""}
+      <button class="btn" id="share">🔗 Share</button>
+    </div>
     ${s.top_roads?.length ? `<h3>Roads with the most</h3>${placeRows(s.top_roads)}` : ""}
     ${s.top_parks?.length ? `<h3>Parks with the most</h3>${placeRows(s.top_parks)}` : ""}
     ${s.top_planning_areas?.length ? `<h3>Areas with the most</h3>${placeRows(s.top_planning_areas)}` : ""}`);
-  $("#share")?.addEventListener("click", share);
+  $("#share").addEventListener("click", share);
   body.querySelectorAll("button[data-kind]").forEach((b) => b.addEventListener("click", async () => {
     await openPlace(b.dataset.kind, b.dataset.slug);
     const i = state.place?.top_species.findIndex((x) => x.id === s.id);
@@ -400,16 +538,15 @@ async function openTree(id, fly = true, keepContext = false) {
   const back = keepContext && (state.place || state.species);
   setUrl({ ...(state.place ? { p: `${state.place.kind}/${state.place.slug}` } : {}), ...(state.species ? { s: state.species.id } : {}), t: id });
   selectPoint([t.lng, t.lat]);
-  if (fly) map.easeTo({ center: [t.lng, t.lat], zoom: Math.max(map.getZoom(), 18), padding: panelPadding(), duration: 700 });
   const s = t.species || {};
   const cat = CATS.find((c) => c.key === t.category) || CATS.at(-1);
   const P = t.places || {};
   const placeLink = (kind) => P[kind] ? `<button class="linkish" data-kind="${kind}" data-slug="${esc(P[kind].slug)}">${esc(P[kind].name)}</button>` : null;
   const rows = [
-    ["Girth", t.girth_m ? `${t.girth_m.toFixed(2)} m <span class="muted">(≈${Math.round((t.girth_m / Math.PI) * 100)} cm diameter)</span>` : t.girth_band],
+    ["Girth", t.girth_m ? `${t.girth_m.toFixed(2)} m <span class="muted">(≈${Math.round((t.girth_m / Math.PI) * 100)} cm diameter)</span>` : esc(t.girth_band)],
     ["Height", t.height_band ? `${esc(t.height_band)} m` : null],
-    ["Age", t.age != null && t.age >= 0 ? `~${t.age} years` : null],
-    ["Planted", t.date_planted],
+    ["Age", t.age != null && t.age >= 0 ? `~${Number(t.age)} years` : null],
+    ["Planted", esc(t.date_planted)],
     ["Carbon", t.carbon_kg ? `~${tonnes(t.carbon_kg)} <span class="muted">(estimate)</span>` : null],
     ["Road", placeLink("road") && `${placeLink("road")}${t.road_dist != null ? ` <span class="muted">· ${Math.round(t.road_dist)} m</span>` : ""}`],
     ["Park", placeLink("park")],
@@ -421,8 +558,8 @@ async function openTree(id, fly = true, keepContext = false) {
     ["Heritage road", placeLink("heritage_road")],
     ["Conservation", t.tca ? `In ${esc(t.tca)}` : null],
     ["Land use", esc(t.land_use)],
-    ["Tree ID", `${t.id}`],
-    ["Updated", t.last_edited],
+    ["Tree ID", `${Number(t.id)}`],
+    ["Updated", esc(t.last_edited)],
   ].filter(([, v]) => v);
   openPanel(`
     ${back ? `<button class="linkish" id="back">← Back to ${esc(state.place?.name || state.species?.common || "list")}</button>` : ""}
@@ -438,48 +575,82 @@ async function openTree(id, fly = true, keepContext = false) {
     <div class="actions">
       ${s.id ? `<button class="btn" id="sp">All ${esc(s.common || s.scientific)} trees</button>` : ""}
       ${safeUrl(s.ffw_url) ? `<a class="btn" href="${esc(safeUrl(s.ffw_url))}" target="_blank" rel="noopener noreferrer">Flora &amp; Fauna Web ↗</a>` : ""}
-      <a class="btn" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${t.lat},${t.lng}" target="_blank" rel="noopener noreferrer">Street View ↗</a>
+      <a class="btn" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${Number(t.lat)},${Number(t.lng)}" target="_blank" rel="noopener noreferrer">Street View ↗</a>
       <button class="btn" id="share">🔗 Share</button>
     </div>
-    <p class="note">Carbon is an allometric estimate (Chave et al. 2014) from girth and height band.</p>`);
+    <p class="note">Carbon is an allometric estimate (Chave et al. 2014) from girth and height band.</p>`, { sheet: "half" });
+  if (fly) map.easeTo({ center: [t.lng, t.lat], zoom: Math.max(map.getZoom(), 18), padding: panelPadding(), duration: 700 });
   $("#back")?.addEventListener("click", () => state.place ? renderPlace(state.place) : openSpecies(state.species.id, false));
   $("#sp")?.addEventListener("click", () => openSpecies(s.id));
   $("#share").addEventListener("click", share);
   body.querySelectorAll("button[data-kind]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.kind, b.dataset.slug)));
 }
 
-// ---- near me
+// ---- near me / near an address
 $("#near").addEventListener("click", () => {
   if (!navigator.geolocation) return toast("Location isn't available in this browser");
   toast("Finding trees near you…", 2000);
   navigator.geolocation.getCurrentPosition((pos) => nearby(pos.coords.latitude, pos.coords.longitude),
-    () => toast("Couldn't get your location"), { enableHighAccuracy: true, timeout: 10000 });
+    () => toast("Couldn't get your location. Check location permission for this site."),
+    { enableHighAccuracy: true, timeout: 10000 });
 });
 map.on("contextmenu", (e) => nearby(e.lngLat.lat, e.lngLat.lng)); // right-click / long-press: trees here
 
-async function nearby(lat, lng, r = 150) {
+async function nearby(lat, lng, r = 150, label = null) {
   let d;
   try { d = await api(`/api/near?lat=${lat}&lng=${lng}&r=${r}&limit=60`); }
   catch (e) { return toast(e.message); }
   state.place = state.species = null;
+  setUrl({});
   const circle = Array.from({ length: 65 }, (_, i) => {
     const a = (i / 64) * 2 * Math.PI;
     return [lng + (r / (111320 * Math.cos((lat * Math.PI) / 180))) * Math.cos(a), lat + (r / 111320) * Math.sin(a)];
   });
   map.getSource("near")?.setData({ type: "Feature", geometry: { type: "LineString", coordinates: circle }, properties: {} });
   setHighlight(["in", ["get", "id"], ["literal", d.trees.map((t) => t.id)]]);
-  map.easeTo({ center: [lng, lat], zoom: 17.2, padding: panelPadding() });
+  selectPoint(label ? [lng, lat] : null);
   openPanel(`
-    <h2>Trees within ${r} m</h2>
-    <div class="stats">${statTile(fmt.format(d.count), "trees")}${statTile(fmt.format(d.species.length), "top species shown")}</div>
+    <h2>${label ? esc(label.title) : `Trees within ${r} m`}</h2>
+    ${label ? `<p class="sub">${esc(label.sub)} · trees within ${r} m</p>` : ""}
+    <div class="stats">${statTile(fmt.format(d.count), "trees")}${statTile(d.trees.length ? `${Number(d.trees[0].dist_m)} m` : "—", "to the nearest tree")}</div>
     <h3>Species here</h3>${barList(d.species.map((s) => ({ label: s.name, n: s.n })), d.count)}
     <h3>Nearest</h3>
-    <ul class="list">${d.trees.slice(0, 40).map((t) => `<li><button data-id="${t.id}"><span>${esc(t.common || t.scientific || "Tree")}</span>
-      <span class="meta">${t.dist_m} m${t.girth_m ? ` · ${t.girth_m.toFixed(1)} m girth` : ""}</span></button></li>`).join("")}</ul>
-    <div class="actions">${[100, 250, 500].filter((x) => x !== r).map((x) => `<button class="btn" data-r="${x}">${x} m</button>`).join("")}</div>`);
+    <ul class="list">${d.trees.slice(0, 40).map((t) => `<li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}</span>
+      <span class="meta">${Number(t.dist_m)} m${t.girth_m ? ` · ${t.girth_m.toFixed(1)} m girth` : ""}</span></button></li>`).join("")}</ul>
+    <div class="actions">${[100, 250, 500].filter((x) => x !== r).map((x) => `<button class="btn" data-r="${x}">${x} m</button>`).join("")}</div>`,
+    { sheet: "half" });
+  map.easeTo({ center: [lng, lat], zoom: r > 300 ? 16.2 : 17.2, padding: panelPadding() });
   body.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
-  body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r))));
+  body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
 }
+
+// ---- about
+$("#about").addEventListener("click", () => {
+  const m = state.meta || {};
+  state.place = state.species = null;
+  openPanel(`
+    <h2>About TreeNerd</h2>
+    <div class="prose">
+      <p>Explore Singapore's ${m.tree_count ? fmt.format(m.tree_count) : "~890,000"} trees by road, park, area, address or species.</p>
+      <h3>Data</h3>
+      <ul>
+        <li>Trees: <a href="https://treessg.nparks.gov.sg" target="_blank" rel="noopener noreferrer">Trees.sg</a> © National Parks Board${m.source_last_edit ? `, last changed ${esc(fmtDate(m.source_last_edit))}` : ""}</li>
+        <li>Boundaries, parks and heritage data: <a href="https://data.gov.sg" target="_blank" rel="noopener noreferrer">data.gov.sg</a> (Singapore Open Data Licence)</li>
+        <li>Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors (ODbL)</li>
+        <li>Basemap and address search: <a href="https://www.onemap.gov.sg" target="_blank" rel="noopener noreferrer">OneMap</a> © Singapore Land Authority</li>
+      </ul>
+      ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. It refreshes automatically.</p>` : ""}
+      <h3>How it's worked out</h3>
+      <ul>
+        <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
+        <li><b>Carbon</b> is an estimate from girth and height (Chave et al. 2014), not a measurement.</li>
+        <li><b>Heights</b> are published in 3 m bands.</li>
+      </ul>
+      <p class="muted">TreeNerd is an independent project and isn't affiliated with NParks or any government agency.
+        To report a problem with a tree itself, contact NParks.</p>
+      <p><a href="https://github.com/brandonndj/trees" target="_blank" rel="noopener noreferrer">Source code</a></p>
+    </div>`, { sheet: "half" });
+});
 
 async function share() {
   const url = location.href;

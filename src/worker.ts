@@ -5,6 +5,7 @@
  *  - /api/*   -> D1 queries + in-memory search index, rate-limited and edge-cached per data build
  *  - cron     -> checks the upstream source for new data and requests a rebuild
  */
+import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
@@ -17,6 +18,8 @@ export interface Env {
   GITHUB_REF: string;
   ARCGIS_TREES_LAYER: string;
   GITHUB_TOKEN?: string;
+  ONEMAP_EMAIL?: string; // optional secrets: OneMap account used for address search
+  ONEMAP_PASSWORD?: string;
 }
 
 const PLACE_COLUMN: Record<string, string> = {
@@ -33,6 +36,7 @@ const ALLOWED_PARAMS: Record<string, string[]> = {
   search: ["q", "kind", "limit"],
   near: ["lat", "lng", "r", "limit"],
   place: ["species", "sort", "limit", "offset"],
+  geocode: ["q"],
 };
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -275,6 +279,42 @@ async function apiSpecies(env: Env, id: number) {
   }, 200, 21600);
 }
 
+// ---------------------------------------------------------------- address search (OneMap)
+const ONEMAP = "https://www.onemap.gov.sg";
+let onemapToken: { value: string; exp: number } | null = null;
+
+/** Token from the configured OneMap account, cached until shortly before it expires. */
+async function getOnemapToken(env: Env, force = false) {
+  if (!env.ONEMAP_EMAIL || !env.ONEMAP_PASSWORD) return null;
+  if (!force && onemapToken && onemapToken.exp - Date.now() > 3600_000) return onemapToken.value;
+  const res = await fetch(`${ONEMAP}/api/auth/post/getToken`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: env.ONEMAP_EMAIL, password: env.ONEMAP_PASSWORD }),
+  });
+  if (!res.ok) { console.error("OneMap token request failed:", res.status); return null; }
+  const d = await res.json<{ access_token?: string; expiry_timestamp?: string | number }>();
+  if (!d.access_token) return null;
+  const exp = Number(d.expiry_timestamp) * 1000 || Date.now() + 2 * 86400_000;
+  onemapToken = { value: d.access_token, exp };
+  return onemapToken.value;
+}
+
+async function apiGeocode(url: URL, env: Env) {
+  const q = cleanQuery(url.searchParams.get("q") ?? "");
+  if (q.length < 3) return json({ q, results: [] });
+  const search = async (token: string | null) => fetch(
+    `${ONEMAP}/api/common/elastic/search?${new URLSearchParams({ searchVal: q, returnGeom: "Y", getAddrDetails: "Y", pageNum: "1" })}`,
+    { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)", ...(token ? { authorization: token } : {}) } },
+  );
+  let res = await search(await getOnemapToken(env));
+  if (res.status === 401 && env.ONEMAP_EMAIL) res = await search(await getOnemapToken(env, true));
+  if (!res.ok) throw new HttpError(502, "address search is unavailable right now");
+  const d = await res.json<{ results?: OnemapHit[] }>();
+  const results = parseOnemap(d.results ?? []);
+  return json({ q, results }, 200, 86400);
+}
+
 function pathParts(url: URL) {
   try {
     return url.pathname.replace(/\/+$/, "").split("/").slice(2).map(decodeURIComponent);
@@ -288,6 +328,7 @@ async function api(env: Env, url: URL): Promise<Response> {
   if (p[0] === "meta") return json((await getMeta(env)) ?? { built_at: null }, 200, 300);
   if (p[0] === "search") return apiSearch(url, env);
   if (p[0] === "near") return apiNear(url, env);
+  if (p[0] === "geocode") return apiGeocode(url, env);
   if (p[0] === "tree" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiTree(env, Number(p[1]));
   if (p[0] === "species" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiSpecies(env, Number(p[1]));
   if (p[0] === "place" && p[1] && p[2]) {
