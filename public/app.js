@@ -599,7 +599,7 @@ $("#near").addEventListener("click", () => {
     () => toast("Couldn't get your location. Check location permission for this site."),
     { enableHighAccuracy: true, timeout: 10000 });
 });
-map.on("contextmenu", (e) => nearby(e.lngLat.lat, e.lngLat.lng)); // right-click / long-press: trees here
+map.on("contextmenu", (e) => nearby(e.lngLat.lat, e.lngLat.lng)); // right-click (desktop): trees here
 
 async function nearby(lat, lng, r = 150, label = null) {
   let d;

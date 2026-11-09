@@ -15,8 +15,11 @@ Out of scope: third-party services TreeNerd links to or reads from, volumetric d
 
 ## Design
 
-- The site is read-only and has no user accounts, cookies or user-submitted content.
+- The site is read-only. It has no user accounts, sets no cookies of its own and stores no user-submitted content.
 - No personal data is collected from visitors or ingested from upstream sources.
-- All responses carry a strict Content Security Policy and standard hardening headers. Scripts load only from the site itself; no third-party CDNs are used.
-- The API accepts only `GET`/`HEAD`, validates every parameter, uses parameterised database queries, and is rate-limited per client.
-- CI pins actions to commit SHAs, Python dependencies are hash-locked, and dependencies are monitored for updates.
+- Every response carries a strict Content Security Policy and standard hardening headers (HSTS, `nosniff`, framing denied, a restrictive permissions policy).
+- Scripts are served from the site itself. The only exception is the Cloudflare Web Analytics beacon.
+- The API accepts only `GET`/`HEAD`, validates every parameter, ignores unknown parameters, uses parameterised database queries, and is rate-limited per client.
+- Links that come from data must be `https://`, and CSV exports are protected against spreadsheet formula injection.
+- Credentials for upstream services are stored as encrypted platform secrets, never in the repository.
+- CI pins actions to commit SHAs, Python dependencies are hash-locked, npm dependencies are audited on every build, and Dependabot raises security updates.
