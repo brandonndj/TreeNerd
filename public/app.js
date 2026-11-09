@@ -623,6 +623,7 @@ async function nearby(lat, lng, r = 150, label = null) {
 }
 
 // ---- about
+const TELEGRAM = "https://t.me/treenerd?direct";
 $("#about").addEventListener("click", () => {
   const m = state.meta || {};
   state.place = state.species = null;
@@ -644,9 +645,11 @@ $("#about").addEventListener("click", () => {
         <li><b>Carbon</b> is an estimate from girth and height (Chave et al. 2014), not a measurement.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
       </ul>
+      <h3>Feedback</h3>
+      <p>Ideas, bugs or questions? Message us on Telegram.</p>
+      <div class="actions"><a class="btn" href="${TELEGRAM}" target="_blank" rel="noopener noreferrer">💬 Message on Telegram</a></div>
       <p class="muted">TreeNerd is an independent project and isn't affiliated with NParks or any government agency.
-        To report a problem with a tree itself, contact NParks.</p>
-      <p><a href="https://github.com/brandonndj/TreeNerd" target="_blank" rel="noopener noreferrer">Source code</a></p>
+        To report a problem with a tree itself, such as a wrong species or a felled tree, contact NParks.</p>
     </div>`, { sheet: "half" });
 });
 
