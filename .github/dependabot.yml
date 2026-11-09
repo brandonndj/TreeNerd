@@ -6,6 +6,10 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
+    groups:
+      # wrangler declares a minimum workers-types version, so they must move together
+      cloudflare:
+        patterns: ["wrangler", "@cloudflare/*"]
   - package-ecosystem: pip
     directory: /pipeline
     schedule: { interval: weekly }
