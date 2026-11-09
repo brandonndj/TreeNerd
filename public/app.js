@@ -380,7 +380,7 @@ addEventListener("resize", () => isPhone() && !panel.hidden && setSheet(state.sh
 
 function setUrl(params) {
   const u = new URL(location.href);
-  for (const k of ["p", "s", "t"]) u.searchParams.delete(k);
+  for (const k of ["p", "s", "t", "q", "near", "n"]) u.searchParams.delete(k);
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, v);
   history.replaceState(null, "", u);
 }
@@ -388,6 +388,13 @@ function restoreFromUrl() {
   const u = new URL(location.href);
   const p = u.searchParams.get("p"), s = u.searchParams.get("s"), t = u.searchParams.get("t");
   const hasView = INITIAL_VIEW;
+  const near = (u.searchParams.get("near") || "").split(",").map(Number);
+  if (near.length >= 2 && near.every(Number.isFinite)) {
+    const name = (u.searchParams.get("n") || "").slice(0, 80);
+    return nearby(near[0], near[1], [100, 150, 250, 500].includes(near[2]) ? near[2] : 150, name ? { title: name, sub: "" } : null);
+  }
+  const query = (u.searchParams.get("q") || "").slice(0, 100);
+  if (query && !p && !s && !t) { q.value = query; $("#clear").hidden = false; runSearch(); return; }
   if (p) { const [kind, ...slug] = p.split("/"); openPlace(kind, slug.join("/"), null, !hasView); }
   else if (s) openSpecies(s, !hasView);
   if (t) openTree(Number(t), !hasView && !p && !s);
@@ -599,7 +606,7 @@ async function nearby(lat, lng, r = 150, label = null) {
   try { d = await api(`/api/near?lat=${lat}&lng=${lng}&r=${r}&limit=60`); }
   catch (e) { return toast(e.message); }
   state.place = state.species = null;
-  setUrl({});
+  setUrl({ near: `${lat.toFixed(5)},${lng.toFixed(5)},${r}`, n: label?.title || null });
   const circle = Array.from({ length: 65 }, (_, i) => {
     const a = (i / 64) * 2 * Math.PI;
     return [lng + (r / (111320 * Math.cos((lat * Math.PI) / 180))) * Math.cos(a), lat + (r / 111320) * Math.sin(a)];
@@ -609,17 +616,19 @@ async function nearby(lat, lng, r = 150, label = null) {
   selectPoint(label ? [lng, lat] : null);
   openPanel(`
     <h2>${label ? esc(label.title) : `Trees within ${r} m`}</h2>
-    ${label ? `<p class="sub">${esc(label.sub)} · trees within ${r} m</p>` : ""}
+    ${label ? `<p class="sub">${label.sub ? `${esc(label.sub)} · ` : ""}trees within ${r} m</p>` : ""}
     <div class="stats">${statTile(fmt.format(d.count), "trees")}${statTile(d.trees.length ? `${Number(d.trees[0].dist_m)} m` : "—", "to the nearest tree")}</div>
     <h3>Species here</h3>${barList(d.species.map((s) => ({ label: s.name, n: s.n })), d.count)}
     <h3>Nearest</h3>
     <ul class="list">${d.trees.slice(0, 40).map((t) => `<li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}</span>
       <span class="meta">${Number(t.dist_m)} m${t.girth_m ? ` · ${t.girth_m.toFixed(1)} m girth` : ""}</span></button></li>`).join("")}</ul>
-    <div class="actions">${[100, 250, 500].filter((x) => x !== r).map((x) => `<button class="btn" data-r="${x}">${x} m</button>`).join("")}</div>`,
+    <div class="actions">${[100, 250, 500].filter((x) => x !== r).map((x) => `<button class="btn" data-r="${x}">${x} m</button>`).join("")}
+      <button class="btn" id="share">🔗 Share</button></div>`,
     { sheet: "half" });
   map.easeTo({ center: [lng, lat], zoom: r > 300 ? 16.2 : 17.2, padding: panelPadding() });
   body.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
   body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
+  $("#share").addEventListener("click", share);
 }
 
 // ---- about

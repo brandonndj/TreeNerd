@@ -6,6 +6,7 @@
  *  - cron     -> checks the upstream source for new data and requests a rebuild
  */
 import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
+import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
@@ -307,8 +308,14 @@ async function apiGeocode(url: URL, env: Env) {
     `${ONEMAP}/api/common/elastic/search?${new URLSearchParams({ searchVal: q, returnGeom: "Y", getAddrDetails: "Y", pageNum: "1" })}`,
     { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)", ...(token ? { authorization: token } : {}) } },
   );
-  let res = await search(await getOnemapToken(env));
-  if (res.status === 401 && env.ONEMAP_EMAIL) res = await search(await getOnemapToken(env, true));
+  let res: Response;
+  try {
+    res = await search(await getOnemapToken(env));
+    if (res.status === 401 && env.ONEMAP_EMAIL) res = await search(await getOnemapToken(env, true));
+  } catch (e) {
+    console.error("OneMap unreachable:", String(e));
+    throw new HttpError(502, "address search is unavailable right now");
+  }
   if (!res.ok) throw new HttpError(502, "address search is unavailable right now");
   const d = await res.json<{ results?: OnemapHit[] }>();
   const results = parseOnemap(d.results ?? []);
@@ -435,6 +442,19 @@ export default {
           ? await cachedApi(request, env, ctx, url)
           : await data(request, env, url);
         return withSecurityHeaders(res);
+      }
+      if (url.pathname === "/sitemap.xml") {
+        return withSecurityHeaders(await sitemap(env.DB, String((await getMeta(env))?.built_at ?? "") || null));
+      }
+      if (url.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
+        // the app shell, with a title/description matching the shared link (?p= / ?s= / ?t=)
+        const shell = await env.ASSETS.fetch(new Request(new URL("/", url), request));
+        const res = withMeta(new Response(shell.body, shell), await pageMeta(env.DB, url));
+        const out = new Response(res.body, res);
+        for (const [k, v] of Object.entries(PAGE_HEADERS)) out.headers.set(k, v);
+        out.headers.set("cache-control", "public, max-age=0, must-revalidate");
+        out.headers.delete("etag"); // body differs per query string
+        return out;
       }
       return env.ASSETS.fetch(request); // static assets get their headers from public/_headers
     } catch (e) {
