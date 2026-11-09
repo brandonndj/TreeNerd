@@ -1,15 +1,22 @@
+# Security updates only: routine version-bump PRs are disabled (open-pull-requests-limit: 0).
+# Dependabot still opens a PR when a dependency has a known vulnerability
+# (requires "Dependabot security updates" to be enabled in the repository settings).
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 0
   - package-ecosystem: npm
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 0
     groups:
       # wrangler declares a minimum workers-types version, so they must move together
       cloudflare:
+        applies-to: security-updates
         patterns: ["wrangler", "@cloudflare/*"]
   - package-ecosystem: pip
     directory: /pipeline
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    open-pull-requests-limit: 0
