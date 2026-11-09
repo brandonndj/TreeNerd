@@ -648,7 +648,7 @@ $("#about").addEventListener("click", () => {
       </ul>
       <p class="muted">TreeNerd is an independent project and isn't affiliated with NParks or any government agency.
         To report a problem with a tree itself, contact NParks.</p>
-      <p><a href="https://github.com/brandonndj/trees" target="_blank" rel="noopener noreferrer">Source code</a></p>
+      <p><a href="https://github.com/brandonndj/TreeNerd" target="_blank" rel="noopener noreferrer">Source code</a></p>
     </div>`, { sheet: "half" });
 });
 
