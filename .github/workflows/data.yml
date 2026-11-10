@@ -105,6 +105,36 @@ jobs:
       - if: env.PUBLISH == 'true'
         run: npm ci --ignore-scripts
 
+      - name: Load the idle database
+        id: load
+        if: env.PUBLISH == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # Two databases take turns so visitors never query one that's mid-load.
+          npx wrangler r2 object get "$R2_BUCKET/active-db" --file build/out/active-db.live --remote > /dev/null 2>&1 || true
+          ACTIVE=$(cat build/out/active-db.live 2>/dev/null | tr -d "[:space:]"); ACTIVE=${ACTIVE:-a}
+          case "$ACTIVE" in a|b) ;; *) echo "unexpected active-db value: '$ACTIVE'"; exit 1;; esac
+          if [ "$ACTIVE" = "b" ]; then TARGET=trees; NEXT=a; else TARGET=trees-b; NEXT=b; fi
+          echo "Live database: ${ACTIVE:-a}; loading $TARGET"
+          for f in build/out/d1/*.sql; do
+            echo "::group::$(basename "$f")"
+            for attempt in 1 2 3; do
+              npx wrangler d1 execute "$TARGET" --remote --yes --file "$f" > /dev/null && break
+              [ "$attempt" = 3 ] && exit 1
+              sleep $((attempt * 15))
+            done
+            echo "::endgroup::"
+          done
+          # verify before switching: same tree count as the build produced
+          EXPECTED=$(python -c "import json;print(json.load(open('build/out/meta.json'))['tree_count'])")
+          GOT=$(npx wrangler d1 execute "$TARGET" --remote --json --command "SELECT count(*) AS n FROM trees" \
+            | python -c "import json,sys;print(json.load(sys.stdin)[0]['results'][0]['n'])")
+          echo "trees loaded: $GOT (expected $EXPECTED)"
+          [ "$GOT" = "$EXPECTED" ]
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+
       - name: Publish files
         if: env.PUBLISH == 'true'
         env:
@@ -119,20 +149,13 @@ jobs:
           put trees.csv.gz trees.csv.gz application/gzip
           put "snapshots/$(date -u +%F)/trees.csv.gz" trees.csv.gz application/gzip
 
-      - name: Load database
+      - name: Switch the site to the new database
         if: env.PUBLISH == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT: ${{ steps.load.outputs.next }}
         run: |
-          for f in build/out/d1/*.sql; do
-            echo "::group::$(basename "$f")"
-            for attempt in 1 2 3; do
-              npx wrangler d1 execute "$D1_DATABASE" --remote --yes --file "$f" > /dev/null && break
-              [ "$attempt" = 3 ] && exit 1
-              sleep $((attempt * 15))
-            done
-            echo "::endgroup::"
-          done
-          npx wrangler d1 execute "$D1_DATABASE" --remote --json --command \
-            "SELECT count(*) AS trees FROM trees" | grep -o '"trees": *[0-9]*'
+          printf '%s' "$NEXT" > build/out/active-db
+          npx wrangler r2 object put "$R2_BUCKET/active-db" --file build/out/active-db --content-type text/plain --remote
+          echo "Live database is now: $NEXT (the previous one is kept as a rollback)"

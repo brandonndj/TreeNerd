@@ -46,6 +46,7 @@ Cloudflare Worker
 
 - **Front end**: plain JavaScript with [MapLibre GL](https://maplibre.org) and [PMTiles](https://protomaps.com/docs/pmtiles), with no build step.
 - **Worker**: TypeScript on Cloudflare Workers, with D1 (database), R2 (files) and edge caching keyed to each data build.
+- **Zero-downtime updates**: two databases take turns. Each update loads the idle one, checks it, then switches the site over; the previous data stays as a rollback.
 - **Pipeline**: Python with Shapely; tiles are built with Tippecanoe.
 
 | Path | Contents |

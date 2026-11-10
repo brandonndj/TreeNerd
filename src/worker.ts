@@ -10,7 +10,9 @@ import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
-  DB: D1Database;
+  DB: D1Database; // the live database, chosen per request from DB_A / DB_B (see activeDb)
+  DB_A: D1Database;
+  DB_B: D1Database;
   DATA: R2Bucket;
   ASSETS: Fetcher;
   API_LIMIT?: RateLimit;
@@ -51,15 +53,33 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 // ---------------------------------------------------------------- isolate cache
 let searchIndex: { version: string; index: SearchIndex } | null = null;
-let buildMeta: { at: number; value: Record<string, unknown> | null } = { at: 0, value: null };
+let buildMeta: { at: number; db: D1Database | null; value: Record<string, unknown> | null } = { at: 0, db: null, value: null };
+let active: { at: number; which: "a" | "b" } = { at: 0, which: "a" };
+
+/**
+ * Blue/green databases: the data pipeline loads whichever database is idle, verifies it, then
+ * writes its name to the R2 object "active-db". Visitors never query a database mid-load.
+ */
+async function activeDb(env: Env): Promise<D1Database> {
+  if (Date.now() - active.at > 30_000) {
+    try {
+      const obj = await env.DATA.get("active-db");
+      const which = obj ? (await obj.text()).trim() : "a";
+      active = { at: Date.now(), which: which === "b" ? "b" : "a" };
+    } catch {
+      active = { ...active, at: Date.now() }; // keep the last known database
+    }
+  }
+  return active.which === "b" ? env.DB_B : env.DB_A;
+}
 
 async function getMeta(env: Env) {
-  if (Date.now() - buildMeta.at < 60_000) return buildMeta.value;
+  if (buildMeta.db === env.DB && Date.now() - buildMeta.at < 60_000) return buildMeta.value;
   try {
     const row = await env.DB.prepare("SELECT value FROM meta WHERE key='build'").first<{ value: string }>();
-    buildMeta = { at: Date.now(), value: row ? JSON.parse(row.value) : null };
+    buildMeta = { at: Date.now(), db: env.DB, value: row ? JSON.parse(row.value) : null };
   } catch {
-    buildMeta = { at: Date.now(), value: null }; // database not loaded yet
+    buildMeta = { at: Date.now(), db: env.DB, value: null }; // database not loaded yet
   }
   return buildMeta.value;
 }
@@ -431,8 +451,9 @@ async function checkForNewData(env: Env) {
 
 // ---------------------------------------------------------------- entry
 export default {
-  async fetch(request, env, ctx): Promise<Response> {
+  async fetch(request, baseEnv, ctx): Promise<Response> {
     const url = new URL(request.url);
+    const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
     try {
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/data/")) {
         if (request.method !== "GET" && request.method !== "HEAD") {
@@ -463,7 +484,8 @@ export default {
       return withSecurityHeaders(json({ error: "internal error" }, 500));
     }
   },
-  async scheduled(_event, env, ctx) {
+  async scheduled(_event, baseEnv, ctx) {
+    const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
     ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
   },
 } satisfies ExportedHandler<Env>;
