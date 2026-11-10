@@ -608,7 +608,9 @@ async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url
         // it names the live build. Junk parameters can't multiply cache entries or force storage reads.
         const tileUrl = new URL(url.origin + url.pathname);
         if (url.searchParams.get("v") === (await version(env))) tileUrl.searchParams.set("v", url.searchParams.get("v")!);
-        const key = new Request(tileUrl.href, { method: "GET" });
+        // The key keeps the request's headers: without Accept-Encoding the cache hands back the
+        // uncompressed variant, three times the size.
+        const key = new Request(tileUrl.href, { method: "GET", headers: request.headers });
         // cache at the edge: tiles are immutable per build.
         // Not on localhost: the local emulator's cache compresses stored gzip responses a second time.
         const local = /^(localhost|127\.0\.0\.1|.*\.localhost)$/.test(url.hostname);
