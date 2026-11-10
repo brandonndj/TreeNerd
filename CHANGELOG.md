@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-11-10: Rankings, recent changes and better carbon estimates
+
+### Added
+- Rankings: the roads, parks and areas with the most trees, species or stored carbon, and the widest trunks. Tap the empty search box.
+- Recent changes: trees added to, or no longer in, NParks' records, on each place and for the whole island. This starts filling in from the second data update after launch.
+- MRT and LRT stations in search, showing the trees within 250 m.
+- The browser's Back and Forward buttons step through the places, trees and lists you opened.
+- Tree-type filters are kept in the link, so a shared link shows the same trees.
+- A loading card when a tree takes a moment to open.
+
+### Changed
+- Carbon estimates use each species' wood density (Global Wood Density Database v.2) instead of one value for every tree. The island-wide total is about 5% lower.
+- "Near me" and address lookups send a position rounded to about 10 m, and request logs are off.
+
+### Fixed
+- The two largest constituencies were only partly highlighted on the map (takes effect with the next data update).
+- Screen readers now hear which search result is selected.
+- The dev preview site can't be indexed by search engines.
+
+### Internal
+- Integration tests for the API and the app in a browser, run in CI on a small fixture site.
+
 ## 2026-11-10: Species details
 
 ### Added

@@ -14,13 +14,38 @@ async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } 
   const ctx = await browser.newContext(ctxOptions);
   await ctx.route(/onemap\.gov\.sg|cloudflareinsights/, (r) => r.abort());
   const page = await ctx.newPage();
-  const errors = [];
+  const errors = [], tiles = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => /parse the tile/i.test(m.text()) && errors.push(m.text()));
+  page.on("response", (r) => /\/tiles\/\d+\//.test(r.url()) && tiles.push({ url: r.url(), status: r.status() }));
   await page.goto(origin + path, { waitUntil: "load" });
   await page.waitForSelector("#legend-items label", { state: "attached" }); // the map has loaded and the app is wired
-  return { ctx, page, errors, h2: () => page.locator("#panel-body h2").textContent(), param: (k) => new URL(page.url()).searchParams.get(k) };
+  return { ctx, page, errors, tiles, h2: () => page.locator("#panel-body h2").textContent(), param: (k) => new URL(page.url()).searchParams.get(k) };
 }
 const panelTitle = (page, text) => page.waitForFunction((t) => document.querySelector("#panel-body h2")?.textContent === t, text);
+
+test("tree dots are drawn, on a first and a repeat visit", async () => {
+  for (const visit of ["first", "repeat"]) {
+    const { ctx, page, errors, tiles } = await open("/#map=16.5/1.3019/103.8378");
+    for (let i = 0; i < 100 && !tiles.some((t) => /\/tiles\/16\//.test(t.url) && t.status === 200); i++) await page.waitForTimeout(100);
+    await page.waitForTimeout(1500);
+    // street trees are green dots on a plain background (the basemap is blocked)
+    const shot = await page.screenshot({ clip: { x: 300, y: 150, width: 700, height: 500 } });
+    const counter = await ctx.newPage(); // a blank page: the app's own security policy forbids data: fetches
+    const green = await counter.evaluate(async (b64) => {
+      const img = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob());
+      const c = new OffscreenCanvas(img.width, img.height).getContext("2d");
+      c.drawImage(img, 0, 0);
+      const d = c.getImageData(0, 0, img.width, img.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) if (d[i + 1] - d[i] > 40 && d[i + 1] - d[i + 2] > 40) n++;
+      return n;
+    }, shot.toString("base64"));
+    assert.ok(green > 300, `${visit} visit: ${green} green pixels`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
 
 test("search: suggestions, keyboard, typo tolerance", async () => {
   const { ctx, page, errors, h2 } = await open("/");

@@ -554,13 +554,15 @@ async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url
         if (request.method !== "GET" && request.method !== "HEAD") {
           return withSecurityHeaders(new Response(null, { status: 405, headers: { allow: "GET, HEAD" } }));
         }
-        // cache at the edge: tiles are immutable per build (?v=)
+        // cache at the edge: tiles are immutable per build (?v=).
+        // Not on localhost: the local emulator's cache compresses stored gzip responses a second time.
+        const local = /^(localhost|127\.0\.0\.1|.*\.localhost)$/.test(url.hostname);
         const cache = caches.default;
-        const hit = await cache.match(request);
+        const hit = local ? undefined : await cache.match(request);
         if (hit) return hit;
         const res = (await serveTiles(url, env.DATA)) ?? new Response("not found", { status: 404 });
         const out = withSecurityHeaders(res);
-        if (out.status === 200 || out.status === 204) ctx.waitUntil(cache.put(request, out.clone()));
+        if (!local && (out.status === 200 || out.status === 204)) ctx.waitUntil(cache.put(request, out.clone()));
         return out;
       }
       if (url.pathname === "/sitemap.xml") {
