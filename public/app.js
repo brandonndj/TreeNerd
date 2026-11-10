@@ -69,11 +69,18 @@ const INITIAL_VIEW = location.hash.includes("map=");
 // ------------------------------------------------------------------ map
 
 const tileUrl = (style) => `https://www.onemap.gov.sg/maps/tiles/${style}/{z}/{x}/{y}.png`;
+// The area OneMap actually draws (it clips Johor to a rectangle). The view is kept inside it, so its edges never show
+// (on very wide screens this also limits how far you can zoom out).
+const BASEMAP_AREA = [[103.582, 1.15], [104.164, 1.4935]];
+// At map zoom < 11.5 OneMap's tiles include a "Pedra Branca, not to scale" inset box off Marina Parade; paint sea over it.
+const INSET_MASK = [[103.9159, 1.24273, 104.00002, 1.29422], [103.908, 1.25097, 103.9159, 1.29147],
+  [103.93478, 1.29422, 103.9698, 1.30211], [103.93616, 1.23449, 103.97118, 1.24273]];
+const seaColor = () => (dark() ? "#033046" : "#d4d4d3"); // OneMap sea as drawn over the background
 const map = new maplibregl.Map({
   container: "map",
   hash: "map",
   center: [103.8198, 1.3521], zoom: 11.3, minZoom: 10.5, maxZoom: 20,
-  maxBounds: [[103.5, 1.1], [104.2, 1.53]],
+  maxBounds: BASEMAP_AREA,
   attributionControl: false,
   dragRotate: false, pitchWithRotate: false, touchPitch: false,
   style: {
@@ -81,13 +88,16 @@ const map = new maplibregl.Map({
     sources: {
       base: {
         type: "raster", tileSize: 256, minzoom: 11, maxzoom: 19, tiles: [tileUrl(dark() ? "Night" : "Grey")],
-        bounds: [103.596, 1.1443, 104.1, 1.4835],
+        bounds: BASEMAP_AREA.flat(),
         attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" style="height:16px;width:16px;vertical-align:-3px"/> <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>',
       },
+      "inset-mask": { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "MultiPolygon",
+        coordinates: INSET_MASK.map(([w, so, e, n]) => [[[w, so], [e, so], [e, n], [w, n], [w, so]]]) } } },
     },
     layers: [
       { id: "bg", type: "background", paint: { "background-color": dark() ? "#0f1411" : "#eef0ea" } },
       { id: "base", type: "raster", source: "base", paint: { "raster-opacity": dark() ? 0.8 : 0.9 } },
+      { id: "inset-mask", type: "fill", source: "inset-mask", maxzoom: 11.5, paint: { "fill-color": seaColor(), "fill-antialias": false } },
     ],
   },
 });
@@ -158,6 +168,7 @@ function refreshMapTheme() {
   map.getSource("base").setTiles([tileUrl(dark() ? "Night" : "Grey")]);
   map.setPaintProperty("bg", "background-color", dark() ? "#0f1411" : "#eef0ea");
   map.setPaintProperty("base", "raster-opacity", dark() ? 0.8 : 0.9);
+  map.setPaintProperty("inset-mask", "fill-color", seaColor());
   if (map.getLayer("trees")) {
     map.setPaintProperty("trees", "circle-color", colorExpr());
     map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");

@@ -10,6 +10,7 @@
 - Trees whose recorded girth and height can't both be right are flagged as a possible recording error, and their carbon isn't estimated.
 
 ### Fixed
+- Wide screens: the map no longer shows the basemap's edges or its "Pedra Branca, not to scale" inset box.
 - Tree dots missing on some corporate networks: tiles are now served one by one by the Worker instead of read from one large file with HTTP range requests, which some security proxies block.
 - Tapping a small tree next to a large one opens the small tree; the tree nearest your finger wins, and smaller trees are drawn on top.
 - Trees on practically the same spot show a short list to choose from (or zoom in when the map is zoomed out).
