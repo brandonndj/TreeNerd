@@ -29,5 +29,25 @@
     "ARCGIS_TREES_LAYER": "https://services6.arcgis.com/s5gdswleLl0QthYa/arcgis/rest/services/TreesSG_TreeInformation_All/FeatureServer/0"
   },
   "observability": { "enabled": true },
-  "placement": { "mode": "smart" }
+  "placement": { "mode": "smart" },
+  "env": {
+    // Preview Worker for non-main branches: `wrangler deploy --env dev`, served on dev.treenerd.fyi.
+    // Reads the same data as production (the app never writes) and has no scheduled refresh.
+    "dev": {
+      "routes": [{ "pattern": "dev.treenerd.fyi", "custom_domain": true }],
+      "triggers": { "crons": [] },
+      "d1_databases": [
+        { "binding": "DB_A", "database_name": "trees" },
+        { "binding": "DB_B", "database_name": "trees-b" }
+      ],
+      "r2_buckets": [{ "binding": "DATA", "bucket_name": "trees-data" }],
+      "ratelimits": [{ "name": "API_LIMIT", "namespace_id": "1002", "simple": { "limit": 300, "period": 60 } }],
+      "vars": {
+        "GITHUB_REPO": "brandonndj/TreeNerd",
+        "GITHUB_WORKFLOW": "data.yml",
+        "GITHUB_REF": "main",
+        "ARCGIS_TREES_LAYER": "https://services6.arcgis.com/s5gdswleLl0QthYa/arcgis/rest/services/TreesSG_TreeInformation_All/FeatureServer/0"
+      }
+    }
+  }
 }
