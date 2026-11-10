@@ -8,7 +8,7 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/", "/sitemap.xml", "/api/*", "/data/*", "/tiles/*"]
+    "run_worker_first": ["/", "/robots.txt", "/sitemap.xml", "/api/*", "/data/*", "/tiles/*"]
   },
   // Only serve on the custom domain; no *.workers.dev or preview hostnames.
   "workers_dev": false,
@@ -28,7 +28,8 @@
     "GITHUB_REF": "main",
     "ARCGIS_TREES_LAYER": "https://services6.arcgis.com/s5gdswleLl0QthYa/arcgis/rest/services/TreesSG_TreeInformation_All/FeatureServer/0"
   },
-  "observability": { "enabled": true },
+  // Keep error logs, but not per-request logs: request URLs can contain a visitor's (rounded) location.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "placement": { "mode": "smart" },
   "env": {
     // Preview Worker for non-main branches: `wrangler deploy --env dev`, served on dev.treenerd.fyi.

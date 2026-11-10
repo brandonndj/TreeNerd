@@ -111,6 +111,14 @@ function withSecurityHeaders(res: Response) {
   return out;
 }
 
+/** Preview hosts (dev.*) must never be indexed. */
+const isPreview = (url: URL) => url.hostname.startsWith("dev.");
+function noIndex(res: Response) {
+  const out = new Response(res.body, res);
+  out.headers.set("x-robots-tag", "noindex, nofollow");
+  return out;
+}
+
 const json = (data: unknown, status = 200, maxAge = 3600) =>
   new Response(JSON.stringify(data), {
     status,
@@ -185,12 +193,14 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   ]);
   const top = parseJSON<[number, number][]>(place.top_species, []);
   const names = await speciesNames(env, top.map(([id]) => id));
+  // which place ids are in the tiles depends on the data build (older builds have fewer)
+  const tileKeys = ((await getMeta(env))?.tile_keys ?? { road: "r", park: "p", planning_area: "a" }) as Record<string, string>;
   return json({
     kind, slug, name: place.name, alt: parseJSON(place.alt, []),
     tree_count: place.tree_count, species_count: place.species_count,
     heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
     bbox: parseJSON(place.bbox, null), extra: parseJSON(place.extra, {}),
-    tile_key: { road: "r", park: "p", planning_area: "a" }[kind] ?? null,
+    tile_key: tileKeys[kind] ?? null,
     place_id: place.id,
     top_species: top.map(([id, n]) => ({ id, n, ...(names.get(id) ?? {}) })),
     categories: cats.results, sizes: sizes.results, heights: heights.results, native: natives.results,
@@ -454,6 +464,19 @@ async function checkForNewData(env: Env) {
 export default {
   async fetch(request, baseEnv, ctx): Promise<Response> {
     const url = new URL(request.url);
+    if (!isPreview(url)) return handle(request, baseEnv, ctx, url);
+    if (url.pathname === "/robots.txt") {
+      return noIndex(new Response("User-agent: *\nDisallow: /\n", { headers: { "content-type": "text/plain; charset=utf-8" } }));
+    }
+    return noIndex(await handle(request, baseEnv, ctx, url));
+  },
+  async scheduled(_event, baseEnv, ctx) {
+    const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
+    ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
+  },
+} satisfies ExportedHandler<Env>;
+
+async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
     const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
     try {
       if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/data/")) {
@@ -497,9 +520,4 @@ export default {
       console.error(e);
       return withSecurityHeaders(json({ error: "internal error" }, 500));
     }
-  },
-  async scheduled(_event, baseEnv, ctx) {
-    const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
-    ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
-  },
-} satisfies ExportedHandler<Env>;
+}

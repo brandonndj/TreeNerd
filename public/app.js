@@ -683,11 +683,13 @@ $("#near").addEventListener("click", () => {
 map.on("contextmenu", (e) => nearby(e.lngLat.lat, e.lngLat.lng)); // right-click (desktop): trees here
 
 async function nearby(lat, lng, r = 150, label = null) {
+  // Privacy: only a position rounded to ~10 m ever leaves the browser.
+  lat = Math.round(lat * 1e4) / 1e4; lng = Math.round(lng * 1e4) / 1e4;
   let d;
   try { d = await api(`/api/near?lat=${lat}&lng=${lng}&r=${r}&limit=60`); }
   catch (e) { return toast(e.message); }
   state.place = state.species = null;
-  setUrl({ near: `${lat.toFixed(5)},${lng.toFixed(5)},${r}`, n: label?.title || null });
+  setUrl({ near: `${lat.toFixed(4)},${lng.toFixed(4)},${r}`, n: label?.title || null });
   const circle = Array.from({ length: 65 }, (_, i) => {
     const a = (i / 64) * 2 * Math.PI;
     return [lng + (r / (111320 * Math.cos((lat * Math.PI) / 180))) * Math.cos(a), lat + (r / 111320) * Math.sin(a)];

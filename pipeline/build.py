@@ -589,6 +589,9 @@ def main():
     write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report)
 
 
+TILE_KEYS = {"road": "r", "park": "p", "planning_area": "a", "subzone": "u", "constituency": "e"}
+
+
 def cell_of(lat, lng):
     """~220 m grid cell id used by the Worker for 'trees near me' queries."""
     return int((lat - 1.1) * 500) * 1000 + int((lng - 103.5) * 500)
@@ -601,7 +604,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
             props = {"id": t["id"], "c": CAT_CODE[t["category"]]}
             for k, v in (("s", t["species_id"]), ("z", SIZE_CODE.get(t["size"] or "")),
                          ("h", t["height_m"]), ("g", round(t["girth_m"] * 100) if t["girth_m"] else None),
-                         ("r", t["road_id"]), ("p", t["park_id"]), ("a", t["pa_id"])):
+                         ("r", t["road_id"]), ("p", t["park_id"]), ("a", t["pa_id"]),
+                         ("u", t["subzone_id"]), ("e", t["ed_id"])):
                 if v is not None:
                     props[k] = v
             fh.write(json.dumps({"type": "Feature", "properties": props,
@@ -638,6 +642,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
         "with_road": sum(1 for t in trees if t["road_id"]),
         "measurement_flags": sum(t["measure_flag"] for t in trees),
         "road_source": road_source,
+        # place kinds whose id is a property of every tree in the tiles (the app highlights by it)
+        "tile_keys": TILE_KEYS,
         "species_enrichment": {k: v for k, v in (enrichment or {}).items() if k != "family_differences"},
         "source_last_edit": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(source_edit / 1000)) if source_edit else None,
         "attribution": [SOURCES["arcgis"]["attribution"], SOURCES["datagovsg"]["attribution"],

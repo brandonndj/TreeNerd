@@ -80,7 +80,7 @@ Cloudflare Worker
 ## Privacy
 
 - No accounts, no cookies set by TreeNerd, and nothing you type is stored.
-- Your location is only used in your browser, and only when you tap "Near me".
+- Your location is only used when you tap "Near me". It's rounded to about 10 m in your browser, then sent to TreeNerd to find the trees around that point. TreeNerd doesn't log or store it.
 - Address searches are passed to [OneMap](https://www.onemap.gov.sg) to find the location.
 - Visits are counted with Cloudflare Web Analytics, which is cookieless and doesn't track individuals.
 
