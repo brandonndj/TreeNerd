@@ -135,6 +135,31 @@ KEEP_UPPER = {"PG", "PCN", "GRC", "SMC", "LC", "TNC", "CC", "BTC", "HDB", "MRT",
 
 
 # --------------------------------------------------------------- carbon
+def heritage_location(desc):
+    """'Common Name : Rain Tree. Found in Fort Canning Park' -> 'Found in Fort Canning Park'.
+    83 of 255 source records end in a bare 'Found in'; those return None rather than a broken sentence."""
+    if not desc:
+        return None
+    s = re.sub(r"^\s*Common Name\s*:[^.]*\.\s*", "", desc).strip()
+    s = re.sub(r"\s+", " ", s)
+    return None if not s or re.fullmatch(r"Found in\.?", s, flags=re.I) else s
+
+
+# Plants measured around a whole clump or aerial-root system: genuinely wide and short, never flagged.
+CLUMP_FAMILIES = {"Arecaceae", "Pandanaceae", "Poaceae", "Musaceae", "Strelitziaceae", "Heliconiaceae"}
+
+
+def implausible_measurements(girth_m, height_m, scientific, family):
+    """True when the recorded girth and height can't both be right: a trunk wider than 0.3x the
+    tree's height (upper bound of its height band). Figs (aerial roots), palms, pandans and bamboo
+    are exempt. On the Nov 2026 data this flags 20 of ~875,000 trees, all physically implausible."""
+    if not girth_m or not height_m:
+        return False
+    if (scientific or "").startswith("Ficus") or (family or "").split(" ")[0] in CLUMP_FAMILIES:
+        return False
+    return girth_m / math.pi > 0.3 * height_m
+
+
 def carbon_estimate(girth_m, height_m, wood_density=0.6):
     """Chave et al. 2014 pantropical AGB; carbon = 47% of biomass. Rough estimate."""
     if not girth_m or girth_m <= 0:
@@ -255,7 +280,7 @@ class SqlWriter:
         (self.folder / f"{self.n_file:03d}-{name}.sql").write_text(sql)
 
     def insert(self, table, cols, rows):
-        head = f"INSERT INTO {table} ({','.join(cols)}) VALUES\n"
+        head = f"INSERT OR REPLACE INTO {table} ({','.join(cols)}) VALUES\n"  # safe to re-run
         batch = []
         for r in rows:
             batch.append("(" + ",".join(q(v) for v in r) + ")")
@@ -491,7 +516,7 @@ def main():
         (hi, ti), d = tree_idx.query_nearest(htp, max_distance=HERITAGE_MAX, return_distance=True)
         for h, t in zip(hi, ti):
             p = ht[h]["properties"]
-            ht_info[int(t)] = {"ht_no": p.get("HT"), "ht_url": p.get("HYPERLINK"), "ht_desc": p.get("DESCRIPTION")}
+            ht_info[int(t)] = {"ht_no": p.get("HT"), "ht_url": p.get("HYPERLINK"), "ht_desc": heritage_location(p.get("DESCRIPTION"))}
         log(f"  heritage register: {len(ht_info)}/{len(ht)} matched to a tree")
 
     # ---- per-tree derived ----------------------------------------------------
@@ -523,7 +548,11 @@ def main():
         t.update(ht_info.get(i, {"ht_no": None, "ht_url": None, "ht_desc": None}))
         if t["ht_no"]:
             t["category"] = "heritage"
+        sp = species.get(t["species_id"]) or {}
+        t["measure_flag"] = 1 if implausible_measurements(t["girth_m"], t["height_m"], sp.get("scientific"), sp.get("family")) else 0
         t["carbon_kg"], t["carbon_nparks"] = carbon_for(t)
+        if t["measure_flag"]:
+            t["carbon_kg"] = None  # depends on girth and height, which don't agree
         t["cell"] = cell_of(t["lat"], t["lng"])
         if t["species_id"] in species:
             species[t["species_id"]]["tree_count"] += 1
@@ -581,32 +610,33 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
 
     log("write: D1 SQL")
     w = SqlWriter(OUT / "d1")
+    # The pipeline loads the idle one of two databases (see data.yml), so the SQL rebuilds tables in
+    # place. Every file is safe to re-run: tables are recreated first, rows use INSERT OR REPLACE,
+    # indexes use IF NOT EXISTS.
     schema = (Path(__file__).resolve().parent.parent / "schema.sql").read_text()
-    staging = schema.replace("CREATE TABLE IF NOT EXISTS trees ", "CREATE TABLE trees_new ") \
-        .replace("CREATE TABLE IF NOT EXISTS species ", "CREATE TABLE species_new ") \
-        .replace("CREATE TABLE IF NOT EXISTS places ", "CREATE TABLE places_new ")
-    staging = re.sub(r"CREATE (UNIQUE )?INDEX[^;]+;\s*", "", staging)
-    staging = re.sub(r"CREATE TABLE IF NOT EXISTS meta[^;]+;\s*", "", staging)
-    w.raw("DROP TABLE IF EXISTS trees_new;\nDROP TABLE IF EXISTS species_new;\n"
-          "DROP TABLE IF EXISTS places_new;\n" + staging, "staging")
+    tables = re.sub(r"CREATE (UNIQUE )?INDEX[^;]+;\s*", "", schema)
+    drop = "".join(f"DROP TABLE IF EXISTS {t};\n" for t in
+                   ("trees_new", "species_new", "places_new", "trees", "species", "places"))
+    w.raw(drop + tables + "DELETE FROM meta WHERE key='build';\n", "tables")
     sp_cols = ["id", "master_id", "scientific", "common", "aliases", "family", "growth_form",
                "native_distribution", "conservation_status", "native", "ffw_url", "tree_count",
                "family_src", "native_src"]
-    w.insert("species_new", sp_cols, ([s.get(c) for c in sp_cols] for s in species.values() if s["tree_count"]))
+    w.insert("species", sp_cols, ([s.get(c) for c in sp_cols] for s in species.values() if s["tree_count"]))
     pl_cols = ["id", "kind", "slug", "name", "alt", "tree_count", "species_count", "heritage_count",
                "carbon_kg", "bbox", "top_species", "extra"]
-    w.insert("places_new", pl_cols, ([p[c] for c in pl_cols] for p in places))
+    w.insert("places", pl_cols, ([p[c] for c in pl_cols] for p in places))
     tr_cols = ["id", "lng", "lat", "cell", "species_id", "girth_m", "girth_band", "size", "height_band",
                "height_m", "age", "category", "date_planted", "incorrect", "road_id", "road_dist",
                "subzone_id", "pa_id", "park_id", "pcn_id", "ed_id", "hr_id", "tca", "nature_way",
-               "land_use", "ht_no", "ht_url", "ht_desc", "carbon_kg", "carbon_nparks", "last_edited"]
-    w.insert("trees_new", tr_cols, ([t[c] for c in tr_cols] for t in trees))
+               "land_use", "ht_no", "ht_url", "ht_desc", "carbon_kg", "carbon_nparks", "last_edited", "measure_flag"]
+    w.insert("trees", tr_cols, ([t[c] for c in tr_cols] for t in trees))
     built = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     meta = {
         "built_at": built, "tree_count": len(trees), "species_count": sum(1 for s in species.values() if s["tree_count"]),
         "place_counts": dict(Counter(p["kind"] for p in places)),
         "category_counts": dict(Counter(t["category"] for t in trees)),
         "with_road": sum(1 for t in trees if t["road_id"]),
+        "measurement_flags": sum(t["measure_flag"] for t in trees),
         "road_source": road_source,
         "species_enrichment": {k: v for k, v in (enrichment or {}).items() if k != "family_differences"},
         "source_last_edit": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(source_edit / 1000)) if source_edit else None,
@@ -615,11 +645,9 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
                         SOURCES["roads"]["primary"]["attribution"] if road_source == "osm"
                         else "Contains information from SLA National Map"],
     }
-    swap = "".join(f"DROP TABLE IF EXISTS {t};\nALTER TABLE {t}_new RENAME TO {t};\n"
-                   for t in ("species", "places", "trees"))
     indexes = "\n".join(re.findall(r"CREATE (?:UNIQUE )?INDEX[^;]+;", schema))
-    w.raw(swap + indexes + "\nCREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);\n"
-          + f"INSERT OR REPLACE INTO meta VALUES ('build', {q(meta)});\n", "swap")
+    # last file: indexes, then the build marker (its presence means the load completed)
+    w.raw(indexes + f"\nINSERT OR REPLACE INTO meta VALUES ('build', {q(meta)});\n", "finish")
 
     log("write: search.json, species.json, meta.json, csv")
     search = [{"k": p["kind"], "s": p["slug"], "n": p["name"], "a": p["alt"], "c": p["tree_count"],

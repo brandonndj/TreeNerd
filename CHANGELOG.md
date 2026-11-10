@@ -7,6 +7,8 @@
 - Place panels show an origin breakdown (native / non-native / unknown) instead of a single "% native".
 - An accuracy check on every data update: NParks' own answers are hidden and compared, and a field isn't filled if it falls below its bar. At launch, family matched 99.8% and origin 100%.
 
+- Trees whose recorded girth and height can't both be right are flagged as a possible recording error, and their carbon isn't estimated.
+
 ### Fixed
 - Tapping a small tree next to a large one opens the small tree; the tree nearest your finger wins, and smaller trees are drawn on top.
 - Trees on practically the same spot show a short list to choose from (or zoom in when the map is zoomed out).

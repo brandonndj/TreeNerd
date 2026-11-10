@@ -108,6 +108,7 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
   border-radius: 999px; padding: 0 14px; min-height: 40px; text-decoration: none; color: var(--text); font-size: 14px; }
 .btn:hover { background: var(--surface-2); }
 .callout { background: color-mix(in srgb, var(--c-heritage) 12%, var(--surface)); border-radius: 10px; padding: 10px 12px; margin-top: 12px; }
+.callout.warn { background: color-mix(in srgb, var(--c-user) 14%, var(--surface)); }
 .note { font-size: 12px; color: var(--muted); margin-top: 6px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px;
   background: var(--surface-2); }

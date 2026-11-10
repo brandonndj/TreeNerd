@@ -56,6 +56,28 @@ class CarbonTests(unittest.TestCase):
         self.assertIsNone(carbon_estimate(None, 9))
 
 
+class HeritageTests(unittest.TestCase):
+    def test_location_cleanup(self):
+        from pipeline.build import heritage_location as loc
+        self.assertEqual(loc("Common Name : Black Rosewood. Found in Fort Canning Park, Fort Green"),
+                         "Found in Fort Canning Park, Fort Green")
+        self.assertIsNone(loc("Common Name : Rain Tree. Found in"))
+        self.assertEqual(loc("Common Name : Mangrove Apple. Found in Pulau Ubin,  near Chek Jawa"),
+                         "Found in Pulau Ubin, near Chek Jawa")
+        self.assertIsNone(loc(None))
+
+
+class MeasurementTests(unittest.TestCase):
+    def test_flags_trunk_too_wide_for_height(self):
+        from pipeline.build import implausible_measurements as bad
+        self.assertTrue(bad(15.0, 9, "Tabebuia rosea", "Bignoniaceae"))     # 4.8 m across, under 9 m tall
+        self.assertTrue(bad(4.0, 3, "Tristaniopsis whiteana", "Myrtaceae"))  # 1.3 m across, under 3 m tall
+        self.assertFalse(bad(4.5, 21, "Pterocarpus indicus", "Fabaceae"))   # big but plausible
+        self.assertFalse(bad(33.0, 27, "Ficus caulocarpa", "Moraceae"))     # aerial roots: exempt
+        self.assertFalse(bad(12.0, 12, "Metroxylon sagu", "Arecaceae (Palmae)"))  # clumping palm: exempt
+        self.assertFalse(bad(None, 9, "Samanea saman", "Fabaceae"))
+
+
 class SpatialTests(unittest.TestCase):
     def test_cell_matches_worker(self):
         # must equal cellOf() in src/worker.ts
