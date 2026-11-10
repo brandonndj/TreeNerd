@@ -106,6 +106,7 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 .list.ranked li button::before { counter-increment: rank; content: counter(rank); flex: 0 0 22px; font-size: 12px; color: var(--muted);
   font-variant-numeric: tabular-nums; text-align: right; }
 .list.ranked li button > span:first-of-type { flex: 1; min-width: 0; }
+#updated.stale { color: var(--c-user); }
 .delta { font-weight: 700; font-variant-numeric: tabular-nums; }
 .delta.plus { color: var(--c-street); }
 .delta.minus { color: var(--c-heritage); }

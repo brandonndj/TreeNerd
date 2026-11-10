@@ -299,7 +299,11 @@ function buildLegendItems() {
 }
 function buildLegend() {
   $("#total").textContent = state.meta?.tree_count ? `· ${fmt.format(state.meta.tree_count)} trees` : "";
-  $("#updated").textContent = state.meta?.built_at ? `Updated ${fmtDate(state.meta.built_at)}` : "";
+  // Updates run weekly. If the data is clearly older than that, say so rather than look current.
+  const age = state.meta?.built_at ? (Date.now() - Date.parse(state.meta.built_at)) / 86400e3 : 0;
+  state.stale = age > 10;
+  $("#updated").textContent = state.meta?.built_at ? `Updated ${fmtDate(state.meta.built_at)}${state.stale ? " · update overdue" : ""}` : "";
+  $("#updated").classList.toggle("stale", state.stale);
   buildLegendItems();
   $("#legend-items").addEventListener("change", (e) => {
     const c = Number(e.target.dataset.c);
@@ -587,7 +591,7 @@ function renderPlace(d) {
     <div class="stats">
       ${statTile(fmt.format(d.tree_count), "trees")}
       ${statTile(fmt.format(d.species_count), "species")}
-      ${statTile(`${nativePct}%`, `native species${unknownPct ? ` · ${unknownPct}% unknown` : ""}`)}
+      ${statTile(`${nativePct}%`, `of trees are native species${unknownPct ? ` · ${unknownPct}% unknown origin` : ""}`)}
       ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
     </div>
     ${d.heritage_count ? `<div class="callout">🌟 ${d.heritage_count} heritage tree${d.heritage_count > 1 ? "s" : ""}</div>` : ""}
@@ -679,6 +683,13 @@ async function openSpecies(id, fly = true) {
   }));
 }
 
+// Why a tree has no carbon estimate (the model only covers ordinary trunks).
+const CARBON_SKIP = {
+  palm: "the model doesn't cover palms, pandans or bamboo",
+  wide: "the recorded girth is wider than any trunk the model covers (often a fig measured around its aerial roots)",
+  flag: "the recorded girth and height can't both be right",
+};
+
 // ---- tree
 async function openTree(id, fly = true, keepContext = false) {
   let t;
@@ -702,7 +713,7 @@ async function openTree(id, fly = true, keepContext = false) {
     ["Height", t.height_band ? `${esc(t.height_band)} m${t.measure_flag ? " ⚠" : ""}` : null],
     ["Age", t.age != null && t.age >= 0 ? `~${Number(t.age)} years` : null],
     ["Planted", esc(t.date_planted)],
-    ["Carbon", t.carbon_kg ? `~${tonnes(t.carbon_kg)} <span class="muted">(estimate)</span>` : null],
+    ["Carbon", t.carbon_kg ? `~${tonnes(t.carbon_kg)} <span class="muted">(estimate)</span>` : CARBON_SKIP[t.carbon_skip] ? `<span class="muted">Not estimated: ${CARBON_SKIP[t.carbon_skip]}</span>` : null],
     ["Road", placeLink("road") && `${placeLink("road")}${t.road_dist != null ? ` <span class="muted">· ${Math.round(t.road_dist)} m</span>` : ""}`],
     ["Park", placeLink("park")],
     ["Park connector", placeLink("pcn")],
@@ -793,7 +804,10 @@ const CHANGE_NOTE = `<p class="note">Compared with NParks' records at each updat
 function changesSection(rows) {
   if (!rows) return ""; // not tracked for this kind of place
   const added = rows.filter((c) => c.change === "added").length, removed = rows.length - added;
-  if (!rows.length) return `<h3>Recent changes</h3><p class="muted">No trees added or removed in the last 6 months of updates.</p>`;
+  // Say "none" only once updates have actually been compared; before that, nothing is known.
+  if (!rows.length) return `<h3>Recent changes</h3><p class="muted">${state.meta?.changes && !state.meta.changes.skipped
+    ? "No trees added or removed here in recent updates."
+    : "Not tracked yet. TreeNerd lists added and removed trees from its next data update."}</p>`;
   return `<h3>Recent changes</h3>
     <p><span class="delta plus">+${fmt.format(added)}</span> added · <span class="delta minus">−${fmt.format(removed)}</span> no longer listed</p>
     <details class="changes"><summary>Show them</summary><ul class="list">${rows.slice(0, 100).map(changeRow).join("")}</ul>${CHANGE_NOTE}</details>`;
@@ -857,7 +871,7 @@ async function openTop(kind = "road", by = "trees") {
   const value = (r) => (by === "carbon" ? tonnes(r.carbon_kg) : fmt.format(by === "species" ? r.species_count : r.tree_count));
   openPanel(`
     <h2>${kind === "tree" ? "Widest tree trunks" : `${esc(TOP_KINDS.find(([k]) => k === kind)[1])}: ${esc(TOP_BYS.find(([b]) => b === by)[1].toLowerCase())}`}</h2>
-    <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump." : "Top 25 in Singapore"}</p>
+    <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump." : by === "carbon" ? "Top 25 in Singapore, by estimated carbon" : "Top 25 in Singapore"}</p>
     ${chips(TOP_KINDS, kind, "kind")}
     ${kind === "tree" ? "" : chips(TOP_BYS, by, "by")}
     <ol class="list ranked">${kind === "tree"
@@ -893,11 +907,11 @@ $("#about").addEventListener("click", () => {
         <li>Wood density: <a href="https://doi.org/10.5281/zenodo.16919509" target="_blank" rel="noopener noreferrer">Global Wood Density Database v.2</a>, Fischer et al. 2026 (CC BY 4.0)</li>
         <li>MRT and LRT stations: Land Transport Authority, via data.gov.sg</li>
       </ul>
-      ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. It refreshes automatically.</p>` : ""}
+      ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. ${state.stale ? "An update is overdue, so recent changes by NParks aren't shown yet." : "It refreshes automatically."}</p>` : ""}
       <h3>How it's worked out</h3>
       <ul>
         <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
-        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement.</li>
+        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than 2.1 m across, which the model doesn't cover.</li>
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>

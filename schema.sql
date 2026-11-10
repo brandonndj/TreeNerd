@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS trees (
   carbon_kg REAL,                   -- estimate: Chave et al. 2014 allometry, 47% of biomass
   carbon_nparks REAL,               -- raw value from NParks Carbon_Storage table (units undocumented)
   last_edited TEXT,
-  measure_flag INTEGER              -- 1 = recorded girth and height can't both be right (see build.py)
+  measure_flag INTEGER,             -- 1 = recorded girth and height can't both be right (see build.py)
+  carbon_skip TEXT                  -- why there is no carbon estimate: flag | palm | wide (see build.py); NULL = estimated
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_places_kind_slug ON places(kind, slug);

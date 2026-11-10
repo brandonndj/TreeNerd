@@ -21,6 +21,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write # to report a failed update
 
 env:
   TIPPECANOE_VERSION: "2.79.0"
@@ -95,6 +96,11 @@ jobs:
       - name: Build
         run: python -m pipeline.build
 
+      - name: Accuracy audit
+        # Re-counts every figure from the tree table and compares a sample of trees with NParks'
+        # live records. A failure stops here: nothing is published.
+        run: python -m pipeline.audit
+
       - name: Build vector tiles
         run: |
           tippecanoe -o build/out/trees.pmtiles --force -P \
@@ -144,15 +150,51 @@ jobs:
             done
             echo "::endgroup::"
           done
-          # verify before switching: same tree count as the build produced
-          EXPECTED=$(python -c "import json;print(json.load(open('build/out/meta.json'))['tree_count'])")
-          GOT=$(npx wrangler d1 execute "$TARGET" --remote --json --command "SELECT count(*) AS n FROM trees" \
-            | python -c "import json,sys;print(json.load(sys.stdin)[0]['results'][0]['n'])")
-          echo "trees loaded: $GOT (expected $EXPECTED)"
-          [ "$GOT" = "$EXPECTED" ]
+          # Verify before switching: the database must hold exactly what the build produced,
+          # and the build marker (written last) must be there.
+          python - "$TARGET" <<'PY'
+          import json, subprocess, sys
+          target = sys.argv[1]
+          meta = json.load(open("build/out/meta.json"))
+          def one(sql):
+              out = subprocess.run(["npx", "wrangler", "d1", "execute", target, "--remote", "--json", "--command", sql],
+                                   check=True, capture_output=True, text=True).stdout
+              return json.loads(out)[0]["results"][0]
+          got = one("SELECT (SELECT count(*) FROM trees) trees, (SELECT count(*) FROM species) species, "
+                    "(SELECT count(*) FROM places) places, (SELECT value FROM meta WHERE key='build') build")
+          want = {"trees": meta["tree_count"], "species": meta["species_count"], "places": sum(meta["place_counts"].values())}
+          print("loaded:", {k: got[k] for k in want}, "expected:", want)
+          assert {k: got[k] for k in want} == want, "row counts differ from the build"
+          assert got["build"] and json.loads(got["build"])["built_at"] == meta["built_at"], "build marker missing or wrong"
+          PY
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
 
-      - name: Publish files
+      - name: Publish the files that belong to this database
+        if: env.PUBLISH == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT: ${{ steps.load.outputs.next }}
+        run: |
+          # Tiles, search index and species list are stored per database ("-a" / "-b"), so the site
+          # switches to all of them at once and a rollback brings back a matching set.
+          put() { npx wrangler r2 object put "$R2_BUCKET/$1" --file "build/out/$2" --content-type "$3" --remote; }
+          put "trees-$NEXT.pmtiles" trees.pmtiles application/vnd.pmtiles
+          put "search-$NEXT.json" search.json application/json
+          put "species-$NEXT.json" species.json application/json
+
+      - name: Switch the site to the new database
+        if: env.PUBLISH == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEXT: ${{ steps.load.outputs.next }}
+        run: |
+          printf '%s' "$NEXT" > build/out/active-db
+          npx wrangler r2 object put "$R2_BUCKET/active-db" --file build/out/active-db --content-type text/plain --remote
+          echo "Live database is now: $NEXT (the previous one is kept as a rollback)"
+
+      - name: Publish the downloads and shared copies
         if: env.PUBLISH == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -168,13 +210,25 @@ jobs:
           # the rolling change log is only replaced when this build was compared with the previous one
           if [ -f build/raw/prev_trees.csv.gz ]; then put changes.json changes.json application/json; fi
 
-      - name: Switch the site to the new database
+      - name: Check the live site switched
         if: env.PUBLISH == 'true'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          NEXT: ${{ steps.load.outputs.next }}
         run: |
-          printf '%s' "$NEXT" > build/out/active-db
-          npx wrangler r2 object put "$R2_BUCKET/active-db" --file build/out/active-db --content-type text/plain --remote
-          echo "Live database is now: $NEXT (the previous one is kept as a rollback)"
+          WANT=$(python -c "import json;print(json.load(open('build/out/meta.json'))['built_at'])")
+          for attempt in $(seq 1 12); do
+            GOT=$(curl -fsS -m 20 "https://treenerd.fyi/api/health" | python -c "import json,sys;d=json.load(sys.stdin);print(d['built_at'] if d['ok'] else 'unhealthy')" 2>/dev/null || echo unreachable)
+            echo "live build: $GOT (want $WANT)"
+            [ "$GOT" = "$WANT" ] && exit 0
+            sleep 15
+          done
+          # "unreachable" can be the site's bot protection refusing this runner; anything else is a real problem
+          [ "$GOT" = "unreachable" ] && { echo "::warning::could not reach the live site to confirm the switch"; exit 0; }
+          echo "::error::the live site is not serving the new build"; exit 1
+
+      - name: Open an issue if the update failed
+        if: failure() && env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "Data update failed ($(date -u +%F))" \
+            --body "The data pipeline run failed, so the site is still showing the previous data. Run: $RUN_URL"

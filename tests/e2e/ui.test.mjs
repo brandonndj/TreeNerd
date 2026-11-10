@@ -101,6 +101,43 @@ test("tree card: details, wood density note, share link", async () => {
   await ctx.close();
 });
 
+test("what the page says matches the data", async () => {
+  const { ctx, page, errors } = await open("/?p=road/orchard-road");
+  await panelTitle(page, "Orchard Road");
+  const api = await (await fetch(`${B}/api/place/road/orchard-road`)).json();
+  const tiles = await page.locator("#panel-body .stat").allTextContents();
+  const fmt = new Intl.NumberFormat("en-SG");
+  assert.ok(tiles[0].startsWith(fmt.format(api.tree_count)), tiles[0]);
+  assert.ok(tiles[1].startsWith(fmt.format(api.species_count)), tiles[1]);
+  const native = api.native.find((n) => n.k === 1)?.n ?? 0;
+  assert.ok(tiles[2].startsWith(`${Math.round((native / api.tree_count) * 100)}%`), tiles[2]);
+  assert.match(tiles[2], /of trees are native species/);
+  assert.ok(tiles[3].startsWith(`${fmt.format(Math.round(api.carbon_kg / 1000))} t`), tiles[3]);
+  // the legend's total and date come from the build
+  const meta = await (await fetch(`${B}/api/meta`)).json();
+  assert.match(await page.textContent("#total"), new RegExp(fmt.format(meta.tree_count)));
+  assert.doesNotMatch(await page.textContent("#updated"), /overdue/);
+  // a palm gets no carbon figure, and the card says why
+  await page.goto(`${B}/?t=13197918`);
+  await page.waitForFunction(() => /Not estimated/.test(document.querySelector("#panel-body")?.textContent || ""));
+  assert.match(await page.textContent("#panel-body"), /Not estimated: the model doesn't cover palms/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("old data is labelled as overdue", async () => {
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await ctx.route(/onemap\.gov\.sg|cloudflareinsights/, (r) => r.abort());
+  await ctx.route("**/api/meta", async (r) => {
+    const res = await r.fetch();
+    await r.fulfill({ response: res, json: { ...(await res.json()), built_at: "2026-01-05T00:00:00Z" } });
+  });
+  const page = await ctx.newPage();
+  await page.goto(B + "/");
+  await page.waitForFunction(() => /overdue/.test(document.querySelector("#updated")?.textContent || ""));
+  await ctx.close();
+});
+
 test("recent changes on a place and across Singapore", async () => {
   const { ctx, page, errors, h2, param } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");

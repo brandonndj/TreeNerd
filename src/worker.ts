@@ -96,12 +96,22 @@ async function version(env: Env) {
   return String((await getMeta(env))?.built_at ?? "none");
 }
 
+/** Files that belong to one database: "<name>-a.<ext>" / "-b", falling back to the shared file. */
+const slotKeys = (name: string, ext: string) => [`${name}-${active.which}.${ext}`, `${name}.${ext}`];
+async function getSlotObject(env: Env, name: string, ext: string, options?: R2GetOptions): Promise<R2ObjectBody | R2Object | null> {
+  for (const key of slotKeys(name, ext)) {
+    const obj: R2ObjectBody | R2Object | null = await env.DATA.get(key, options);
+    if (obj) return obj;
+  }
+  return null;
+}
+
 async function getSearch(env: Env) {
   const v = await version(env);
   if (searchIndex?.version === v) return searchIndex.index;
-  const obj = await env.DATA.get("search.json");
-  if (!obj) throw new HttpError(503, "search is not available yet");
-  searchIndex = { version: v, index: new SearchIndex(await obj.json<Entry[]>()) };
+  const obj = await getSlotObject(env, "search", "json");
+  if (!obj || !("body" in obj)) throw new HttpError(503, "search is not available yet");
+  searchIndex = { version: v, index: new SearchIndex(await (obj as R2ObjectBody).json<Entry[]>()) };
   return searchIndex.index;
 }
 
@@ -350,6 +360,35 @@ async function apiChanges(env: Env) {
   }
 }
 
+/** How old the data may get before the site reports itself unhealthy (updates run weekly). */
+const STALE_AFTER_DAYS = 10;
+
+/**
+ * GET /api/health: for uptime monitors. 200 when the live database, search index and tiles are all
+ * present and the data is fresh; 503 otherwise. Never cached.
+ */
+async function apiHealth(env: Env) {
+  const meta = await getMeta(env);
+  const builtAt = meta?.built_at ? Date.parse(String(meta.built_at)) : NaN;
+  const ageDays = Number.isFinite(builtAt) ? (Date.now() - builtAt) / 86400_000 : null;
+  const present = async (name: string, ext: string) => {
+    for (const key of slotKeys(name, ext)) if (await env.DATA.head(key).catch(() => null)) return true;
+    return false;
+  };
+  const checks = {
+    database: await env.DB.prepare("SELECT 1 FROM trees LIMIT 1").first().then((r) => !!r, () => false),
+    build: !!meta,
+    search: await present("search", "json"),
+    tiles: await present("trees", "pmtiles"),
+    fresh: ageDays !== null && ageDays <= STALE_AFTER_DAYS,
+  };
+  const ok = Object.values(checks).every(Boolean);
+  return new Response(JSON.stringify({
+    ok, checks, built_at: meta?.built_at ?? null, age_days: ageDays === null ? null : Math.round(ageDays * 10) / 10,
+    stale_after_days: STALE_AFTER_DAYS, database: active.which,
+  }), { status: ok ? 200 : 503, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
+}
+
 /** Rankings: places of one kind by trees / species / carbon, or the trees with the widest trunks. */
 const TOP_BY: Record<string, string> = { trees: "tree_count", species: "species_count", carbon: "carbon_kg" };
 async function apiTop(url: URL, env: Env) {
@@ -451,6 +490,7 @@ async function cachedApi(request: Request, env: Env, ctx: ExecutionContext, url:
       return res;
     }
   }
+  if (url.pathname === "/api/health") return apiHealth(env); // live state: never from the cache
   const allowed = ALLOWED_PARAMS[url.pathname.split("/")[2] ?? ""] ?? [];
   const clean = new URL(url.origin + url.pathname);
   for (const k of allowed) {
@@ -472,7 +512,10 @@ async function cachedApi(request: Request, env: Env, ctx: ExecutionContext, url:
 async function data(request: Request, env: Env, url: URL) {
   const key = url.pathname.slice("/data/".length);
   if (!R2_PUBLIC.has(key)) throw new HttpError(404, "not found");
-  const obj = await env.DATA.get(key, { range: request.headers, onlyIf: request.headers });
+  // the species list must match the live database; everything else is the latest published file
+  const obj: R2ObjectBody | R2Object | null = key === "species.json"
+    ? await getSlotObject(env, "species", "json", { range: request.headers, onlyIf: request.headers })
+    : await env.DATA.get(key, { range: request.headers, onlyIf: request.headers });
   if (!obj) throw new HttpError(404, "not found");
   const headers = new Headers();
   obj.writeHttpMetadata(headers);
@@ -480,16 +523,17 @@ async function data(request: Request, env: Env, url: URL) {
   headers.set("accept-ranges", "bytes");
   headers.set("cache-control", key === "trees.pmtiles" ? "public, max-age=86400" : "public, max-age=3600");
   if (!("body" in obj)) return new Response(null, { status: 304, headers });
+  const body = (obj as R2ObjectBody).body;
   const range = obj.range as { offset?: number; length?: number; suffix?: number } | undefined;
   if (range && request.headers.has("range")) {
     const offset = range.offset ?? (range.suffix != null ? obj.size - range.suffix : 0);
     const length = range.length ?? obj.size - offset;
     headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${obj.size}`);
     headers.set("content-length", String(length));
-    return new Response(request.method === "HEAD" ? null : obj.body, { status: 206, headers });
+    return new Response(request.method === "HEAD" ? null : body, { status: 206, headers });
   }
   headers.set("content-length", String(obj.size));
-  return new Response(request.method === "HEAD" ? null : obj.body, { headers });
+  return new Response(request.method === "HEAD" ? null : body, { headers });
 }
 
 // ---------------------------------------------------------------- cron: freshness check
@@ -503,8 +547,14 @@ async function checkForNewData(env: Env) {
   const last = await env.DB.prepare("SELECT value FROM meta WHERE key='last_dispatch'").first<{ value: string }>()
     .catch(() => null);
   const sinceDispatch = Date.now() - Number(last?.value ?? 0);
-  if (!lastEdit || lastEdit <= built + 60_000 || sinceDispatch < 20 * 3600_000) return;
-  if (!env.GITHUB_TOKEN) return console.warn("upstream data changed; automatic rebuild is not configured");
+  // Rebuild when the source has changed, or when the weekly update has been missed (it runs every
+  // 7 days, so a build older than 8 means a run failed or never started).
+  const builtAt = meta?.built_at ? Date.parse(String(meta.built_at)) : 0;
+  const overdue = Date.now() - builtAt > 8 * 86400_000;
+  const changed = !!lastEdit && lastEdit > built + 60_000;
+  if (overdue) console.error(`data is ${Math.round((Date.now() - builtAt) / 86400_000)} days old: the weekly update was missed`);
+  if (!(changed || overdue) || sinceDispatch < 20 * 3600_000) return;
+  if (!env.GITHUB_TOKEN) return console.warn("a rebuild is needed; automatic rebuild is not configured");
   const gh = await fetch(
     `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW}/dispatches`,
     {
@@ -513,7 +563,7 @@ async function checkForNewData(env: Env) {
         authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json",
         "user-agent": "TreeNerd (+https://treenerd.fyi)", "content-type": "application/json",
       },
-      body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { reason: "upstream data changed" } }),
+      body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { reason: changed ? "upstream data changed" : "weekly update missed" } }),
     },
   );
   console.log("rebuild requested:", gh.status);
@@ -554,15 +604,20 @@ async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url
         if (request.method !== "GET" && request.method !== "HEAD") {
           return withSecurityHeaders(new Response(null, { status: 405, headers: { allow: "GET, HEAD" } }));
         }
-        // cache at the edge: tiles are immutable per build (?v=).
+        // Normalise the address before it is used as a cache key: only ?v= survives, and only when
+        // it names the live build. Junk parameters can't multiply cache entries or force storage reads.
+        const tileUrl = new URL(url.origin + url.pathname);
+        if (url.searchParams.get("v") === (await version(env))) tileUrl.searchParams.set("v", url.searchParams.get("v")!);
+        const key = new Request(tileUrl.href, { method: "GET" });
+        // cache at the edge: tiles are immutable per build.
         // Not on localhost: the local emulator's cache compresses stored gzip responses a second time.
         const local = /^(localhost|127\.0\.0\.1|.*\.localhost)$/.test(url.hostname);
         const cache = caches.default;
-        const hit = local ? undefined : await cache.match(request);
+        const hit = local ? undefined : await cache.match(key);
         if (hit) return hit;
-        const res = (await serveTiles(url, env.DATA)) ?? new Response("not found", { status: 404 });
+        const res = (await serveTiles(tileUrl, env.DATA, slotKeys("trees", "pmtiles"))) ?? new Response("not found", { status: 404 });
         const out = withSecurityHeaders(res);
-        if (!local && (out.status === 200 || out.status === 204)) ctx.waitUntil(cache.put(request, out.clone()));
+        if (!local && (out.status === 200 || out.status === 204)) ctx.waitUntil(cache.put(key, out.clone()));
         return out;
       }
       if (url.pathname === "/sitemap.xml") {

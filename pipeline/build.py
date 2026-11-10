@@ -160,6 +160,23 @@ def implausible_measurements(girth_m, height_m, scientific, family):
     return girth_m / math.pi > 0.3 * height_m
 
 
+# The carbon model (Chave et al. 2014) was fitted to trees with trunks 5-212 cm in diameter and
+# excludes palms. Outside that, no estimate is made: a fig measured around its aerial roots
+# (girths up to 51 m are recorded) would otherwise be credited with hundreds of tonnes.
+CARBON_MAX_GIRTH_M = 6.66  # 212 cm diameter
+
+
+def carbon_skip(girth_m, family, measure_flag):
+    """Why a tree gets no carbon estimate: 'flag', 'palm', 'wide', or None when it gets one."""
+    if measure_flag:
+        return "flag"  # girth and height can't both be right
+    if (family or "").split(" ")[0] in CLUMP_FAMILIES:
+        return "palm"  # palms, pandans, bamboo: not trees the model covers
+    if girth_m and girth_m > CARBON_MAX_GIRTH_M:
+        return "wide"  # wider than any trunk the model was fitted to
+    return None
+
+
 DEFAULT_WOOD_DENSITY = 0.6  # g/cm3, used only when no wood density table is available
 
 
@@ -583,8 +600,9 @@ def main():
         sp = species.get(t["species_id"]) or {}
         t["measure_flag"] = 1 if implausible_measurements(t["girth_m"], t["height_m"], sp.get("scientific"), sp.get("family")) else 0
         t["carbon_kg"], t["carbon_nparks"] = carbon_for(t)
-        if t["measure_flag"]:
-            t["carbon_kg"] = None  # depends on girth and height, which don't agree
+        t["carbon_skip"] = carbon_skip(t["girth_m"], sp.get("family"), t["measure_flag"])
+        if t["carbon_skip"]:
+            t["carbon_kg"] = None
         t["cell"] = cell_of(t["lat"], t["lng"])
         if t["species_id"] in species:
             species[t["species_id"]]["tree_count"] += 1
@@ -689,7 +707,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     tr_cols = ["id", "lng", "lat", "cell", "species_id", "girth_m", "girth_band", "size", "height_band",
                "height_m", "age", "category", "date_planted", "incorrect", "road_id", "road_dist",
                "subzone_id", "pa_id", "park_id", "pcn_id", "ed_id", "hr_id", "tca", "nature_way",
-               "land_use", "ht_no", "ht_url", "ht_desc", "carbon_kg", "carbon_nparks", "last_edited", "measure_flag"]
+               "land_use", "ht_no", "ht_url", "ht_desc", "carbon_kg", "carbon_nparks", "last_edited", "measure_flag",
+               "carbon_skip"]
     w.insert("trees", tr_cols, ([t[c] for c in tr_cols] for t in trees))
     built = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 

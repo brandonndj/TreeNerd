@@ -14,6 +14,10 @@ const steps = [
   ...["search.json", "species.json", "trees.pmtiles"].map((f) =>
     ["wrangler", "r2", "object", "put", `trees-data/${f}`, "--file", `${FIX}/${f}`, "--local", "--persist-to", STATE]),
 ];
+// the fixture's build date is fixed; make it yesterday so the site counts as up to date
+const yesterday = new Date(Date.now() - 86400e3).toISOString().slice(0, 19) + "Z";
+steps.push(["wrangler", "d1", "execute", "trees", "--local", "--yes", "--persist-to", STATE, "--command",
+  `UPDATE meta SET value=json_set(value, '$.built_at', '${yesterday}') WHERE key='build'`]);
 for (const s of steps) {
   if (npx(s).status !== 0) { console.error("seeding failed:", s.join(" ")); process.exit(1); }
 }

@@ -58,6 +58,28 @@ test("tree and species carry the wood density used for carbon", async () => {
   assert.ok(s.top_roads.length > 0);
 });
 
+test("carbon is only estimated where the model applies", async () => {
+  const palm = await getJson("/api/tree/13197918");
+  assert.equal(palm.carbon_kg, null);
+  assert.equal(palm.carbon_skip, "palm");
+  const wide = await getJson("/api/tree/12975949");
+  assert.ok(wide.girth_m > 6.66);
+  assert.deepEqual([wide.carbon_kg, wide.carbon_skip], [null, "wide"]);
+  const ordinary = await getJson("/api/tree/10687021");
+  assert.ok(ordinary.carbon_kg > 0 && ordinary.carbon_kg < 30000);
+  assert.equal(ordinary.carbon_skip, null);
+});
+
+test("health: everything present and fresh", async () => {
+  const r = await get("/api/health");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  const h = await r.json();
+  assert.equal(h.ok, true);
+  assert.deepEqual(h.checks, { database: true, build: true, search: true, tiles: true, fresh: true });
+  assert.ok(h.age_days < 2);
+});
+
 test("nearby trees, sorted by distance, only inside Singapore", async () => {
   const n = await getJson("/api/near?lat=1.2994&lng=103.8455&r=100");
   assert.ok(n.count > 0);
@@ -77,15 +99,21 @@ test("rankings and recent changes", async () => {
 });
 
 test("tiles: TileJSON, a tile with trees, an empty tile, a bad address", async () => {
-  const tj = await getJson("/tiles/trees.json?v=test");
+  const v = encodeURIComponent((await getJson("/api/meta")).built_at);
+  const tj = await getJson(`/tiles/trees.json?v=${v}`);
   assert.equal(tj.minzoom, 10);
-  assert.match(tj.tiles[0], /\/tiles\/\{z\}\/\{x\}\/\{y\}\.mvt\?v=test$/);
-  const tile = await get("/tiles/14/12917/8132.mvt?v=test");
+  assert.ok(tj.tiles[0].endsWith(`/tiles/{z}/{x}/{y}.mvt?v=${v}`), tj.tiles[0]);
+  const tile = await get(`/tiles/14/12917/8132.mvt?v=${v}`);
   assert.equal(tile.status, 200);
   assert.equal(tile.headers.get("content-type"), "application/vnd.mapbox-vector-tile");
   assert.match(tile.headers.get("cache-control"), /immutable/);
   assert.ok((await tile.arrayBuffer()).byteLength > 500);
-  assert.equal((await get("/tiles/14/12000/8000.mvt?v=test")).status, 204);
+  assert.equal((await get(`/tiles/14/12000/8000.mvt?v=${v}`)).status, 204);
+  // a version that isn't the live build, or junk parameters, never earns a long-lived cache entry
+  const junk = await get("/tiles/14/12917/8132.mvt?v=not-a-build&x=1");
+  assert.equal(junk.status, 200);
+  assert.doesNotMatch(junk.headers.get("cache-control"), /immutable/);
+  assert.ok((await getJson("/tiles/trees.json?v=not-a-build")).tiles[0].endsWith(".mvt"));
   assert.equal((await get("/tiles/14/99999999/1.mvt")).status, 404);
   assert.equal((await get("/tiles/abc")).status, 404);
 });
