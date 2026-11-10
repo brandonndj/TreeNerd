@@ -2,12 +2,16 @@
 // so nothing here depends on an outside service.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { chromium, devices } from "playwright";
+import * as playwright from "playwright";
+
+// E2E_BROWSER=webkit runs the same tests in Safari's engine (CI does both).
+const engine = playwright[process.env.E2E_BROWSER || "chromium"];
+const { devices } = playwright;
 
 const B = process.env.E2E_BASE || "http://127.0.0.1:8799";
 const PORT = new URL(B).port;
 let browser;
-before(async () => { browser = await chromium.launch(); });
+before(async () => { browser = await engine.launch(); });
 after(() => browser?.close());
 
 async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } }, origin = B) {
@@ -234,6 +238,75 @@ test("phone: bottom sheet, collapsed legend, theme toggle", async () => {
   const before = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   await page.tap("#theme");
   assert.notEqual(await page.evaluate(() => getComputedStyle(document.body).backgroundColor), before);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// ---- iPhone and iPad: the devices TreeNerd is mostly used on
+const IOS = [["iPhone portrait", "iPhone 15 Pro"], ["iPhone landscape", "iPhone 15 Pro landscape"],
+  ["iPad Mini portrait", "iPad Mini"], ["iPad Pro 11 portrait", "iPad Pro 11"], ["iPad Pro 11 landscape", "iPad Pro 11 landscape"]];
+const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes"];
+
+for (const [label, device] of IOS) {
+  test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {
+    for (const path of IOS_VIEWS) {
+      // layout is measured in points, so render at 1x: software rendering at an iPad's 2x is very slow
+      const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 });
+      if (path !== "/") await page.waitForSelector("#panel-body h2");
+      else { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
+      const report = await page.evaluate(() => {
+        const shown = (e) => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
+          return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && r.bottom > 0 && r.top < innerHeight; };
+        const small = [];
+        for (const e of document.querySelectorAll("button, a, input, summary, label, li[role=option], [role=button]")) {
+          if (!shown(e)) continue;
+          if (e.matches("input[type=checkbox]") && e.closest("label")) continue; // its label is the target
+          if (e.closest(".maplibregl-ctrl-attrib-inner")) continue;                // links inside the opened credits text
+          const r = e.getBoundingClientRect();
+          if (r.height < 43.5 || r.width < 43.5) small.push(`${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} "${(e.textContent || "").trim().slice(0, 20)}" ${Math.round(r.width)}x${Math.round(r.height)}`);
+        }
+        const box = (sel) => { const e = document.querySelector(sel); return e && shown(e) ? e.getBoundingClientRect() : null; };
+        const hits = (a, b) => a && b && a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+        const legend = box("#legend");
+        return { small, overflow: document.documentElement.scrollWidth > innerWidth,
+          overlap: ["#theme", "#near", ".search", "#panel"].filter((s) => hits(box(s), legend)) };
+      });
+      assert.deepEqual(report.small, [], `${path}: controls smaller than 44 points`);
+      assert.deepEqual(report.overlap, [], `${path}: overlaps the legend`);
+      assert.equal(report.overflow, false, `${path}: page scrolls sideways`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  });
+}
+
+test("iPhone and iPad: the legend starts closed where it would cover the map, and opens on a tap", async () => {
+  for (const device of ["iPhone 15 Pro", "iPhone 15 Pro landscape", "iPad Mini"]) {
+    const { ctx, page } = await open("/", { ...devices[device], deviceScaleFactor: 1 });
+    assert.equal(await page.getAttribute("#legend-toggle", "aria-expanded"), "false", device);
+    await page.tap("#legend-toggle");
+    assert.equal(await page.getAttribute("#legend-toggle", "aria-expanded"), "true", device);
+    await page.tap('#legend-items label:has(input[data-c="1"])');
+    assert.equal(await page.isChecked('#legend-items input[data-c="1"]'), false, device);
+    await ctx.close();
+  }
+});
+
+test("iPhone: press and hold the map shows the trees there; a short tap doesn't", async () => {
+  const { ctx, page, errors, param } = await open("/#map=17/1.2994/103.8455", { ...devices["iPhone 15 Pro"], deviceScaleFactor: 1 });
+  const canvas = page.locator(".maplibregl-canvas");
+  const touch = [{ identifier: 1, clientX: 200, clientY: 200 }];
+  await canvas.dispatchEvent("touchstart", { touches: touch, changedTouches: touch, targetTouches: touch });
+  await page.waitForTimeout(200);
+  await canvas.dispatchEvent("touchend", { touches: [], changedTouches: touch, targetTouches: [] });
+  await page.waitForTimeout(700);
+  assert.equal(param("near"), null, "a short touch must not open anything");
+  await canvas.dispatchEvent("touchstart", { touches: touch, changedTouches: touch, targetTouches: touch });
+  await page.waitForFunction(() => new URL(location.href).searchParams.has("near"));
+  await canvas.dispatchEvent("touchend", { touches: [], changedTouches: touch, targetTouches: [] });
+  await page.waitForSelector("#panel-body h2");
+  assert.match(await page.textContent("#panel-body h2"), /Trees within 150 m/);
+  assert.match(param("near"), /^1\.\d{4},103\.\d{4},150$/);
   assert.deepEqual(errors, []);
   await ctx.close();
 });

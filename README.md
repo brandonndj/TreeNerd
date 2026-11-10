@@ -6,13 +6,17 @@ TreeNerd maps Singapore's ~890,000 trees and makes them searchable by **road**, 
 
 ![TreeNerd showing the trees of Orchard Road](docs/screenshot.jpg)
 
+## Principles
+
+Every build must meet three requirements, in this order: **accuracy**, a good **iPhone and iPad experience**, and **reliability**. They're defined, with the checks that enforce them, in [PRINCIPLES.md](PRINCIPLES.md).
+
 ## Features
 
 - **Forgiving search**: typos and abbreviations work ("orchad rd", "upp thomson", "jln kayu"), and species match by common, scientific, Chinese and Malay names.
 - **Address and station search**: postal codes, HDB blocks, building names and MRT/LRT stations show the trees within 100–500 m.
 - **Place summaries**: tree and species counts, share of native species, estimated carbon, heritage trees, and top species (tap one to filter the map). Each summary lists its largest trees and offers a CSV download.
 - **Tree cards**: species, girth, height, age, estimated carbon, and the road, park, area and constituency the tree is in. Heritage trees include their story.
-- **Trees near me**, using your location, or anywhere by right-clicking the map on a computer.
+- **Trees near me**, using your location, or anywhere: press and hold the map on a phone or tablet, or right-click on a computer.
 - **Rankings**: the roads, parks and areas with the most trees, species or stored carbon, and the widest trunks. Tap the empty search box to find them.
 - **Recent changes**: trees added to, or no longer in, NParks' records, for each place and for the whole island.
 - **Made for phones**: a resizable bottom sheet and large tap targets. It can be installed to the home screen.
@@ -41,6 +45,7 @@ Add `&c=1,2` to show only some tree types (1 street, 2 park, 3 Botanic Gardens, 
 Data pipeline (GitHub Actions: weekly, and whenever the source data changes)
   fetch  → public tree inventory, open government geodata, OpenStreetMap roads, reference tables
   build  → clean, de-duplicate, spatial joins, carbon estimates, comparison with the previous build
+  audit  → re-count every figure, compare a sample of trees with the live source; stop on any failure
   output → vector tiles, database, search index, CSV export
 
 Cloudflare Worker
@@ -54,7 +59,8 @@ Cloudflare Worker
 - **Front end**: plain JavaScript with [MapLibre GL](https://maplibre.org), with no build step.
 - **Tiles**: one [PMTiles](https://protomaps.com/docs/pmtiles) archive in storage. The Worker reads it and serves ordinary tile requests, so the map also works on networks that block partial-file requests.
 - **Worker**: TypeScript on Cloudflare Workers, with D1 (database), R2 (files) and edge caching keyed to each data build.
-- **Zero-downtime updates**: two databases take turns. Each update loads the idle one, checks it, then switches the site over; the previous data stays as a rollback.
+- **Zero-downtime updates**: two databases take turns. Each update loads the idle one, checks it, then switches the site over, together with the tiles and search files that belong to it. The previous build stays as a rollback, which the `Roll back data` workflow restores.
+- **Monitoring**: `/api/health` reports whether everything is present and the data is fresh. A failed update opens an issue, and a missed weekly update triggers a rebuild.
 - **Pipeline**: Python with Shapely; tiles are built with Tippecanoe.
 
 | Path | Contents |
@@ -65,7 +71,7 @@ Cloudflare Worker
 | `src/search.ts` | Fuzzy search over places and species |
 | `src/geocode.ts` | Address-search helpers (query clean-up, result parsing) |
 | `src/pages.ts` | Page titles, link previews, sitemap |
-| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed) |
+| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed), `audit.py` (accuracy audit run before publishing) |
 | `data/sources.json` | Upstream sources used by the pipeline |
 | `schema.sql` | Database schema |
 | `tests/` | Unit tests for the pipeline, search, address search and security headers |
@@ -88,6 +94,7 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 | `/api/near?lat=&lng=&r=` | Trees within `r` metres (10–600) of a point in Singapore |
 | `/api/top?kind=&by=` | Rankings |
 | `/api/changes` | Trees recently added or removed |
+| `/api/health` | 200 when everything is present and the data is fresh, otherwise 503 |
 | `/data/trees.csv.gz` | Every tree, as one CSV |
 
 ## Methodology
@@ -96,7 +103,9 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 - **Areas** (subzones, planning areas, parks, constituencies, conservation areas) are assigned by point-in-polygon.
 - **Carbon is an estimate.** It uses a standard pantropical allometric model (Chave et al., 2014) on girth, height band and wood density, with 47% of biomass counted as carbon. Treat it as indicative.
   - **Wood density** comes from the [Global Wood Density Database v.2](https://doi.org/10.5281/zenodo.16919509). A tree uses the value for its species (about 80% of trees; names are matched as NParks records them, then by Kew's accepted name), otherwise the average for its genus (15%), otherwise the average across the matched trees (5%).
-  - The model was built for forest trees. It's weakest for palms, figs and heavily pruned street trees.
+  - **No estimate is made where the model doesn't apply**: palms, pandans and bamboo (about 29,000 trees), and trunks recorded as wider than 2.12 m across (about 360 trees, mostly figs measured around their aerial roots). The model was fitted to trunks 5–212 cm in diameter; before this limit, single figs were credited with up to 490 tonnes. Place totals leave these trees out.
+  - The model was built for forest trees, so it's still rough for heavily pruned street trees.
+- **Every update is audited before it's published.** Every place and species figure is re-counted from the tree table, and 300 random trees are compared with NParks' live records. If anything disagrees, the update stops and the site keeps its previous data.
 - **Heights are banded** (3 m bands) as published by the source.
 - **Species family and origin** come from NParks. Where NParks has none, they're filled from Kew's [World Checklist of Vascular Plants](https://powo.science.kew.org/about-wcvp):
   - Names are matched to one accepted plant. Outdated names are followed to their current one, and same-name clashes are settled by the author name. A match that stays unclear is skipped.

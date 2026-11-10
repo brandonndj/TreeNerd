@@ -38,9 +38,14 @@ jobs:
         run: npx wrangler deploy --dry-run --outdir /tmp/worker-dist
 
   integration:
-    # Runs the Worker locally on a small fixture site and tests the API and the app in a browser.
+    # Runs the Worker locally on a small fixture site and tests the API and the app in a browser:
+    # Chromium, and WebKit (Safari's engine, for iPhone and iPad).
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,6 +56,8 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Install the test browser
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: API and browser tests
+        env:
+          E2E_BROWSER: ${{ matrix.browser }}
         run: npm run test:e2e

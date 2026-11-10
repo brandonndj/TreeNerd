@@ -241,6 +241,7 @@ function wireMapEvents() {
   });
   map.on("mouseleave", "trees", () => { map.getCanvas().style.cursor = ""; hover.hidden = true; });
   map.on("click", (e) => {
+    if (Date.now() - heldAt < 800) return; // the finger lifting after a press-and-hold isn't a tap
     const cands = treesAt(e.point);
     if (!cands.length) {
       if (isPhone() && !panel.hidden) setSheet("peek");
@@ -323,7 +324,9 @@ function buildLegend() {
   };
   let saved = null;
   try { saved = localStorage.getItem("legend"); } catch { /* private mode */ }
-  setCollapsed(saved ? saved === "closed" : isPhone(), false); // phones start closed, desktops open
+  // Starts closed where it would cover much of the map: phones, short screens, and narrow touch screens.
+  const cramped = isPhone() || innerHeight <= 500 || (matchMedia("(pointer: coarse)").matches && innerWidth < 900);
+  setCollapsed(saved ? saved === "closed" : cramped, false);
   tg.addEventListener("click", () => setCollapsed(!lg.classList.contains("collapsed"), true));
 }
 
@@ -761,6 +764,18 @@ $("#near").addEventListener("click", () => {
     { enableHighAccuracy: true, timeout: 10000 });
 });
 map.on("contextmenu", (e) => nearby(e.lngLat.lat, e.lngLat.lng)); // right-click (desktop): trees here
+// Touch screens have no right-click (and iOS sends no contextmenu): press and hold does the same.
+let hold = null, heldAt = 0;
+const cancelHold = () => { clearTimeout(hold?.timer); hold = null; };
+map.on("touchstart", (e) => {
+  cancelHold();
+  if (e.originalEvent.touches.length !== 1) return;
+  const { lngLat, point } = e;
+  hold = { point, timer: setTimeout(() => { hold = null; heldAt = Date.now(); nearby(lngLat.lat, lngLat.lng); }, 600) };
+});
+map.on("touchmove", (e) => { if (hold && Math.hypot(e.point.x - hold.point.x, e.point.y - hold.point.y) > 10) cancelHold(); });
+map.on("touchend", cancelHold);
+map.on("touchcancel", cancelHold);
 
 async function nearby(lat, lng, r = 150, label = null) {
   // Privacy: only a position rounded to ~10 m ever leaves the browser.

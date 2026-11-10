@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-11-10: Accuracy, iPhone and iPad, reliability
+
+### Accuracy
+- Every data update is audited before it's published: all place and species figures are re-counted, and 300 random trees are compared with NParks' live records.
+- Carbon is no longer estimated where the model doesn't apply: palms, and trunks recorded as wider than 2.12 m across. Single figs had been credited with up to 490 tonnes. The tree card says why there's no figure. Together with wood density, the island total is about 16% lower than at launch.
+- Clearer wording: "of trees are native species"; changes read "not tracked yet" until a comparison has been made; data that's overdue for an update is labelled.
+
+### iPhone and iPad
+- Every control is at least 44 × 44 points on touch screens.
+- On iPads and landscape iPhones, the top buttons no longer sit on the legend, the legend starts closed, and the side panel is narrower.
+- Tapping quickly no longer lets a slow answer replace what you opened after it.
+
+### Reliability
+- Tiles and search files switch together with the database, so a rollback restores a matching set. A `Roll back data` workflow does it in one step.
+- `/api/health` for uptime monitoring; a failed update opens an issue; a missed weekly update triggers a rebuild.
+- The three build requirements are written down in PRINCIPLES.md and enforced by tests, including a run in Safari's engine.
+
 ## 2026-11-10: Rankings, recent changes and better carbon estimates
 
 ### Added
