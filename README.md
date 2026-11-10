@@ -94,7 +94,7 @@ python -m unittest discover -s tests                      # pipeline tests
 
 ## Feedback
 
-Ideas, bugs or questions: message us on [Telegram](https://t.me/treenerd?direct). To report a vulnerability, see [SECURITY.md](SECURITY.md). For mistakes in the tree data itself (wrong species, felled trees), contact NParks; fixes flow into TreeNerd at the next update.
+Ideas, bugs or questions: join our [Telegram channel](https://t.me/treenerd). To report a vulnerability, see [SECURITY.md](SECURITY.md). For mistakes in the tree data itself (wrong species, felled trees), contact NParks; fixes flow into TreeNerd at the next update.
 
 ## Data & attribution
 

@@ -713,7 +713,7 @@ async function nearby(lat, lng, r = 150, label = null) {
 }
 
 // ---- about
-const TELEGRAM = "https://t.me/treenerd?direct";
+const TELEGRAM = "https://t.me/treenerd";
 $("#about").addEventListener("click", () => {
   const m = state.meta || {};
   state.place = state.species = null;
@@ -738,8 +738,8 @@ $("#about").addEventListener("click", () => {
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>
       <h3>Feedback</h3>
-      <p>Ideas, bugs or questions? Message us on Telegram.</p>
-      <div class="actions"><a class="btn" href="${TELEGRAM}" target="_blank" rel="noopener noreferrer">💬 Message on Telegram</a></div>
+      <p>Ideas, bugs or questions? Join our Telegram channel.</p>
+      <div class="actions"><a class="btn" href="${TELEGRAM}" target="_blank" rel="noopener noreferrer">💬 Join on Telegram</a></div>
       <p class="muted">TreeNerd is an independent project and isn't affiliated with NParks or any government agency.
         To report a problem with a tree itself, such as a wrong species or a felled tree, contact NParks.</p>
     </div>`, { sheet: "half" });
