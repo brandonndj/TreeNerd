@@ -10,19 +10,20 @@ const npx = (args, opts = {}) => spawnSync("npx", args, { stdio: ["ignore", "ign
 
 rmSync(STATE, { recursive: true, force: true });
 const steps = [
-  ["wrangler", "d1", "execute", "trees", "--local", "--yes", "--persist-to", STATE, "--file", `${FIX}/seed.sql`],
+  ["wrangler", "d1", "execute", "trees", "--env", "e2e", "--local", "--yes", "--persist-to", STATE, "--file", `${FIX}/seed.sql`],
   ...["search.json", "species.json", "trees.pmtiles"].map((f) =>
-    ["wrangler", "r2", "object", "put", `trees-data/${f}`, "--file", `${FIX}/${f}`, "--local", "--persist-to", STATE]),
+    ["wrangler", "r2", "object", "put", `trees-data/${f}`, "--env", "e2e", "--file", `${FIX}/${f}`, "--local", "--persist-to", STATE]),
 ];
 // the fixture's build date is fixed; make it yesterday so the site counts as up to date
 const yesterday = new Date(Date.now() - 86400e3).toISOString().slice(0, 19) + "Z";
-steps.push(["wrangler", "d1", "execute", "trees", "--local", "--yes", "--persist-to", STATE, "--command",
+steps.push(["wrangler", "d1", "execute", "trees", "--env", "e2e", "--local", "--yes", "--persist-to", STATE, "--command",
   `UPDATE meta SET value=json_set(value, '$.built_at', '${yesterday}') WHERE key='build'`]);
 for (const s of steps) {
   if (npx(s).status !== 0) { console.error("seeding failed:", s.join(" ")); process.exit(1); }
 }
 
-const server = spawn("npx", ["wrangler", "dev", "--port", PORT, "--persist-to", STATE, "--log-level", "warn"],
+// the "e2e" environment (wrangler.jsonc) has the same bindings with a rate limit a fast test run can't hit
+const server = spawn("npx", ["wrangler", "dev", "--env", "e2e", "--port", PORT, "--persist-to", STATE, "--log-level", "warn"],
   { stdio: ["ignore", "ignore", "inherit"], detached: true });
 const stop = () => { try { process.kill(-server.pid); } catch { /* already gone */ } };
 process.on("exit", stop);
