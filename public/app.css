@@ -126,6 +126,9 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 .legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .legend-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px;
   padding-top: 6px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.legend.collapsed #legend-items, .legend.collapsed .legend-foot { display: none; }
+.legend-title .chev { margin-left: auto; padding-left: 10px; color: var(--muted); transition: transform .15s ease; }
+.legend.collapsed .legend-title .chev { transform: rotate(-90deg); }
 .legend-foot button, .legend-foot a { border: 0; background: none; color: var(--accent); padding: 6px 0; font-size: 12px; text-decoration: underline; }
 .foot-links { display: inline-flex; gap: 12px; }
 
@@ -144,7 +147,8 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
   :root:not([data-theme="light"]) .maplibregl-ctrl-attrib-button { filter: invert(1); } }
 :root[data-theme="dark"] .maplibregl-ctrl-group button span, :root[data-theme="dark"] .maplibregl-ctrl-attrib-button { filter: invert(1); }
 :root[data-theme="dark"] .maplibregl-ctrl-attrib, :root:not([data-theme="light"]) .maplibregl-ctrl-attrib { color: var(--text); }
-.maplibregl-ctrl-attrib.maplibregl-compact { background: var(--surface); }
+.maplibregl-ctrl-attrib.maplibregl-compact, .maplibregl-ctrl-attrib { background: var(--surface); color: var(--text); }
+.maplibregl-ctrl-attrib a { color: var(--accent); }
 .maplibregl-ctrl-bottom-right { right: var(--safe-r); bottom: var(--safe-b); }
 
 /* ---------- phones ---------- */
@@ -153,7 +157,6 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
   .pill span { display: none; }
   .pill { padding: 0; }
   .legend { top: calc(max(12px, var(--safe-t)) + 52px); padding: 4px 12px; }
-  .legend.collapsed #legend-items, .legend.collapsed .legend-foot { display: none; }
   body.panel-open .legend { display: none; }
 
   /* bottom sheet: height is set from JS (peek / half / full) and draggable via the handle */

@@ -275,9 +275,16 @@ function buildLegend() {
     map.setFilter("trees", filterExpr());
   });
   const lg = $("#legend"), tg = $("#legend-toggle");
-  const setCollapsed = (v) => { lg.classList.toggle("collapsed", v); tg.setAttribute("aria-expanded", String(!v)); };
-  if (isPhone()) setCollapsed(true);
-  tg.addEventListener("click", () => setCollapsed(!lg.classList.contains("collapsed")));
+  const setCollapsed = (v, remember) => {
+    lg.classList.toggle("collapsed", v);
+    tg.setAttribute("aria-expanded", String(!v));
+    tg.title = v ? "Show the tree types" : "Hide the tree types";
+    if (remember) { try { localStorage.setItem("legend", v ? "closed" : "open"); } catch { /* private mode */ } }
+  };
+  let saved = null;
+  try { saved = localStorage.getItem("legend"); } catch { /* private mode */ }
+  setCollapsed(saved ? saved === "closed" : isPhone(), false); // phones start closed, desktops open
+  tg.addEventListener("click", () => setCollapsed(!lg.classList.contains("collapsed"), true));
 }
 
 // ------------------------------------------------------------------ search
