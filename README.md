@@ -40,7 +40,8 @@ Data pipeline (GitHub Actions: weekly, and whenever the source data changes)
 Cloudflare Worker
   /              app shell, with per-link titles and previews
   /api/*         JSON API: search, places, trees, species, nearby, address search
-  /data/*        vector tiles (PMTiles) and data files
+  /tiles/*       vector tiles, one small request per tile (read from a PMTiles archive in R2)
+  /data/*        data files (CSV export, archive)
   /sitemap.xml   every place and species page
 ```
 

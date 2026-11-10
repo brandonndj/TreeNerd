@@ -1,4 +1,4 @@
-/* TreeNerd front end: MapLibre + PMTiles + the Worker API. No build step. */
+/* TreeNerd front end: MapLibre + the Worker API. No build step. */
 const $ = (s, el = document) => el.querySelector(s);
 const fmt = new Intl.NumberFormat("en-SG");
 /** Only allow https links from data into href attributes. */
@@ -67,8 +67,6 @@ function toast(msg, ms = 3500) {
 const INITIAL_VIEW = location.hash.includes("map=");
 
 // ------------------------------------------------------------------ map
-const protocol = new pmtiles.Protocol();
-maplibregl.addProtocol("pmtiles", protocol.tile);
 
 const tileUrl = (style) => `https://www.onemap.gov.sg/maps/tiles/${style}/{z}/{x}/{y}.png`;
 const map = new maplibregl.Map({
@@ -130,7 +128,8 @@ map.on("load", async () => {
   const meta = await api("/api/meta").catch(() => null);
   state.meta = meta;
   const v = encodeURIComponent(meta?.built_at || "dev");
-  map.addSource("trees", { type: "vector", url: `pmtiles://${location.origin}/data/trees.pmtiles?v=${v}`, promoteId: "id" });
+  // Tiles are served one by one by the Worker (no HTTP Range requests, which some corporate proxies break).
+  map.addSource("trees", { type: "vector", url: `${location.origin}/tiles/trees.json?v=${v}`, promoteId: "id" });
   map.addLayer({
     id: "trees", type: "circle", source: "trees", "source-layer": "trees", filter: filterExpr(),
     layout: { "circle-sort-key": ["-", 0, ["coalesce", ["get", "g"], 0]] }, // smaller girth drawn on top

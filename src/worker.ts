@@ -7,6 +7,7 @@
  */
 import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
+import { serveTiles } from "./tiles";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
@@ -463,6 +464,19 @@ export default {
           ? await cachedApi(request, env, ctx, url)
           : await data(request, env, url);
         return withSecurityHeaders(res);
+      }
+      if (url.pathname.startsWith("/tiles/")) {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+          return withSecurityHeaders(new Response(null, { status: 405, headers: { allow: "GET, HEAD" } }));
+        }
+        // cache at the edge: tiles are immutable per build (?v=)
+        const cache = caches.default;
+        const hit = await cache.match(request);
+        if (hit) return hit;
+        const res = (await serveTiles(url, env.DATA)) ?? new Response("not found", { status: 404 });
+        const out = withSecurityHeaders(res);
+        if (out.status === 200 || out.status === 204) ctx.waitUntil(cache.put(request, out.clone()));
+        return out;
       }
       if (url.pathname === "/sitemap.xml") {
         return withSecurityHeaders(await sitemap(env.DB, String((await getMeta(env))?.built_at ?? "") || null));
