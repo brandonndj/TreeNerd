@@ -58,5 +58,8 @@ export async function serveTiles(url: URL, bucket: R2Bucket): Promise<Response |
   // Versioned URLs (?v=build) never change, so they can be cached for a long time.
   const cache = url.searchParams.has("v") ? "public, max-age=604800, immutable" : "public, max-age=3600";
   if (!tile || tile.data.byteLength === 0) return new Response(null, { status: 204, headers: { "cache-control": cache } });
-  return new Response(tile.data, { headers: { "content-type": "application/vnd.mapbox-vector-tile", "cache-control": cache } });
+  // Content-Encoding makes the Workers runtime gzip the tile on the way out (about 3x smaller).
+  return new Response(tile.data, {
+    headers: { "content-type": "application/vnd.mapbox-vector-tile", "content-encoding": "gzip", "cache-control": cache, vary: "accept-encoding" },
+  });
 }
