@@ -79,5 +79,6 @@ CREATE INDEX IF NOT EXISTS idx_trees_ed ON trees(ed_id);
 CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id);
 CREATE INDEX IF NOT EXISTS idx_trees_species ON trees(species_id);
 CREATE INDEX IF NOT EXISTS idx_trees_cell ON trees(cell);
+CREATE INDEX IF NOT EXISTS idx_trees_girth ON trees(girth_m);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);

@@ -39,12 +39,13 @@
   <div id="map" aria-label="Map of trees in Singapore"></div>
 
   <header class="topbar">
-    <div class="search" role="combobox" aria-haspopup="listbox" aria-owns="results" aria-expanded="false">
+    <div class="search">
       <span class="search-icon" aria-hidden="true">🔎</span>
-      <input id="q" type="search" autocomplete="off" spellcheck="false" maxlength="100"
-             placeholder="Road, park, postal code, species…" aria-label="Search" aria-controls="results">
+      <input id="q" type="search" autocomplete="off" spellcheck="false" maxlength="100" role="combobox"
+             placeholder="Road, park, postal code, species…" aria-label="Search roads, parks, areas, addresses and species"
+             aria-controls="results" aria-expanded="false" aria-autocomplete="list" aria-haspopup="listbox">
       <button id="clear" class="icon-btn" hidden aria-label="Clear search">✕</button>
-      <ul id="results" role="listbox" hidden></ul>
+      <ul id="results" role="listbox" aria-label="Search results" hidden></ul>
     </div>
     <button id="near" class="pill" title="Trees around me" aria-label="Trees near me">📍 <span>Near me</span></button>
     <button id="theme" class="pill" title="Switch theme" aria-label="Switch theme"></button>

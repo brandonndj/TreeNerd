@@ -57,8 +57,15 @@ function applyThemeAttr() {
 }
 applyThemeAttr();
 
+/** Tree types to show: all of them, unless the link carries ?c=1,2,… */
+function catsFromUrl() {
+  const all = CATS.map((c) => c.code);
+  const raw = new URL(location.href).searchParams.get("c");
+  if (raw == null) return new Set(all);
+  return new Set(raw.split(",").map(Number).filter((n) => all.includes(n)));
+}
 const state = {
-  cats: new Set(CATS.map((c) => c.code)),
+  cats: catsFromUrl(),
   highlight: null,        // maplibre expression selecting highlighted trees
   place: null, species: null, tree: null,
   meta: null, speciesDict: {}, sheet: "half",
@@ -296,6 +303,10 @@ function buildLegend() {
     const c = Number(e.target.dataset.c);
     e.target.checked ? state.cats.add(c) : state.cats.delete(c);
     map.setFilter("trees", filterExpr());
+    const u = new URL(location.href); // keep the choice in the link, so a shared link shows the same trees
+    if (state.cats.size === CATS.length) u.searchParams.delete("c");
+    else u.searchParams.set("c", [...state.cats].sort().join(","));
+    history.replaceState(null, "", u);
   });
   const lg = $("#legend"), tg = $("#legend-toggle");
   const setCollapsed = (v, remember) => {
@@ -320,23 +331,44 @@ q.addEventListener("input", () => {
 });
 q.addEventListener("keydown", (e) => {
   if (results.hidden) return;
-  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+  if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length) {
     e.preventDefault();
     active = (active + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-    [...results.children].forEach((li, i) => li.setAttribute("aria-selected", i === active));
+    const opts = [...results.querySelectorAll("li[role=option]")];
+    opts.forEach((li, i) => li.setAttribute("aria-selected", i === active));
+    q.setAttribute("aria-activedescendant", opts[active].id);
+    opts[active].scrollIntoView({ block: "nearest" });
   } else if (e.key === "Enter" && items.length) {
     choose(items[Math.max(active, 0)]);
   } else if (e.key === "Escape") hideResults();
 });
-q.addEventListener("focus", () => items.length && q.value && showResults());
+q.addEventListener("focus", () => (q.value.trim().length < 2 ? showSuggestions() : items.length && showResults()));
 document.addEventListener("click", (e) => !e.target.closest(".search") && hideResults());
-$("#clear").addEventListener("click", () => { q.value = ""; $("#clear").hidden = true; hideResults(); q.focus(); });
+$("#clear").addEventListener("click", () => { q.value = ""; $("#clear").hidden = true; hideResults(); q.focus(); showSuggestions(); });
+
+/** With nothing typed, offer the rankings as a starting point. */
+const SUGGESTIONS = [
+  { kind: "top", top: "road", name: "Roads with the most trees" },
+  { kind: "top", top: "park", name: "Parks with the most trees" },
+  { kind: "top", top: "planning_area", name: "Areas with the most trees" },
+  { kind: "top", top: "tree", name: "Widest tree trunks in Singapore" },
+];
+function showSuggestions() {
+  items = SUGGESTIONS; active = -1;
+  results.innerHTML = `<li class="group" role="presentation">Explore</li>` + items.map((r, i) => `
+    <li role="option" id="opt-${i}" aria-selected="false"><span class="badge">Top</span><span class="r-name">${esc(r.name)}</span></li>`).join("");
+  wireResults();
+  showResults();
+}
+function wireResults() {
+  [...results.querySelectorAll("li[role=option]")].forEach((li, i) => li.addEventListener("click", () => choose(items[i])));
+}
 
 const looksLikeAddress = (t) => /\d/.test(t) || /^(blk|block)\b/i.test(t);
 
 async function runSearch() {
   const text = q.value.trim();
-  if (text.length < 2) return hideResults();
+  if (text.length < 2) { ++searchSeq; return document.activeElement === q ? showSuggestions() : hideResults(); }
   const seq = ++searchSeq;
   const addressFirst = looksLikeAddress(text);
   const geocode = () => (text.length >= 3 ? api(`/api/geocode?q=${encodeURIComponent(text)}`).catch(() => ({ results: [] })) : Promise.resolve({ results: [] }));
@@ -355,22 +387,23 @@ function renderResults(text, local, addresses, addressFirst) {
   const addr = addresses.map((a) => ({ ...a, kind: "address" }));
   items = addressFirst ? [...addr, ...local].slice(0, 12) : [...local.slice(0, 8), ...addr].slice(0, 12);
   active = -1;
-  results.innerHTML = items.length ? items.map((r) => r.kind === "address" ? `
-      <li role="option" aria-selected="false">
+  results.innerHTML = items.length ? items.map((r, i) => r.kind === "address" ? `
+      <li role="option" id="opt-${i}" aria-selected="false">
         <span class="badge addr">${r.postal ? "Postal" : "Address"}</span>
         <span class="r-name">${esc(r.name)}<span class="r-alt">${esc(r.address)}</span></span></li>` : `
-      <li role="option" aria-selected="false">
+      <li role="option" id="opt-${i}" aria-selected="false">
         <span class="badge">${esc(KIND_LABEL[r.kind] || r.kind)}</span>
         <span class="r-name">${esc(r.name)}${r.kind === "species" && r.alt?.[0] ? `<span class="r-alt">${esc(r.alt[0])}</span>` : ""}</span>
         <span class="r-count">${fmt.format(r.count)}</span></li>`).join("")
-    : `<li class="empty">No matches for “${esc(text)}”</li>`;
-  [...results.querySelectorAll("li[role=option]")].forEach((li, i) => li.addEventListener("click", () => choose(items[i])));
+    : `<li class="empty" role="status">No matches for “${esc(text)}”</li>`;
+  wireResults();
   showResults();
 }
-function showResults() { results.hidden = false; $(".search").setAttribute("aria-expanded", "true"); }
-function hideResults() { results.hidden = true; $(".search").setAttribute("aria-expanded", "false"); }
+function showResults() { results.hidden = false; q.setAttribute("aria-expanded", "true"); q.removeAttribute("aria-activedescendant"); }
+function hideResults() { results.hidden = true; q.setAttribute("aria-expanded", "false"); q.removeAttribute("aria-activedescendant"); }
 function choose(r) {
   hideResults();
+  if (r.kind === "top") { q.blur(); return openTop(r.top); }
   q.value = r.name; $("#clear").hidden = false; q.blur();
   if (r.kind === "address") nearby(r.lat, r.lng, 150, { title: r.name, sub: r.address });
   else if (r.kind === "species") openSpecies(r.slug);
@@ -445,16 +478,31 @@ addEventListener("resize", () => isPhone() && !panel.hidden && setSheet(state.sh
   });
 })();
 
+/**
+ * Put what's open into the link. Opening something new adds a history entry, so the browser's
+ * Back button returns to the previous place / tree / list; re-rendering the same thing doesn't.
+ */
 function setUrl(params) {
   const u = new URL(location.href);
-  for (const k of ["p", "s", "t", "q", "near", "n"]) u.searchParams.delete(k);
+  for (const k of ["p", "s", "t", "q", "near", "n", "top"]) u.searchParams.delete(k);
   for (const [k, v] of Object.entries(params)) if (v != null) u.searchParams.set(k, v);
-  history.replaceState(null, "", u);
+  if (u.search === location.search) history.replaceState(null, "", u);
+  else history.pushState(null, "", u);
 }
-function restoreFromUrl() {
+// Back / Forward: show whatever that link describes (the map view comes back through its #map= part).
+addEventListener("popstate", () => {
+  const sp = new URL(location.href).searchParams;
+  if (["p", "s", "t", "near", "top"].some((k) => sp.has(k))) restoreFromUrl(true);
+  else if (!panel.hidden) closePanel();
+});
+function restoreFromUrl(hasView = INITIAL_VIEW) {
   const u = new URL(location.href);
   const p = u.searchParams.get("p"), s = u.searchParams.get("s"), t = u.searchParams.get("t");
-  const hasView = INITIAL_VIEW;
+  const top = u.searchParams.get("top");
+  if (top) { const [kind, by] = top.split(":"); return openTop(kind, by); }
+  if (!p && !s) state.place = state.species = null;
+  if (!t) selectPoint(null);
+  if (!u.searchParams.has("near")) map.getSource("near")?.setData({ type: "FeatureCollection", features: [] });
   const near = (u.searchParams.get("near") || "").split(",").map(Number);
   if (near.length >= 2 && near.every(Number.isFinite)) {
     const name = (u.searchParams.get("n") || "").slice(0, 80);
@@ -618,8 +666,11 @@ async function openSpecies(id, fly = true) {
 // ---- tree
 async function openTree(id, fly = true, keepContext = false) {
   let t;
+  // on a slow connection, say so instead of leaving the tap looking ignored
+  const slow = setTimeout(() => openPanel(`<p class="muted" role="status">Loading tree…</p>`, { sheet: "half" }), 300);
   try { t = await api(`/api/tree/${encodeURIComponent(id)}`); }
-  catch (e) { return toast(`Tree ${id}: ${e.message}`); }
+  catch (e) { toast(`Tree ${id}: ${e.message}`); return; }
+  finally { clearTimeout(slow); }
   state.tree = t;
   const back = keepContext && (state.place || state.species);
   setUrl({ ...(state.place ? { p: `${state.place.kind}/${state.place.slug}` } : {}), ...(state.species ? { s: state.species.id } : {}), t: id });
@@ -711,6 +762,41 @@ async function nearby(lat, lng, r = 150, label = null) {
   map.easeTo({ center: [lng, lat], zoom: r > 300 ? 16.2 : 17.2, padding: panelPadding() });
   body.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
   body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
+  $("#share").addEventListener("click", share);
+}
+
+// ---- rankings
+const TOP_KINDS = [["road", "Roads"], ["park", "Parks"], ["planning_area", "Areas"], ["subzone", "Subzones"],
+  ["constituency", "Constituencies"], ["tree", "Widest trunks"]];
+const TOP_BYS = [["trees", "Most trees"], ["species", "Most species"], ["carbon", "Most carbon"]];
+async function openTop(kind = "road", by = "trees") {
+  if (!TOP_KINDS.some(([k]) => k === kind)) kind = "road";
+  if (!TOP_BYS.some(([b]) => b === by)) by = "trees";
+  openPanel(`<p class="muted" role="status">Loading…</p>`, { sheet: "half" });
+  let d;
+  try { d = await api(`/api/top?kind=${kind}${kind === "tree" ? "" : `&by=${by}`}`); }
+  catch (e) { return openPanel(`<h2>Rankings</h2><p class="muted">${esc(e.message)}</p>`); }
+  state.place = state.species = null;
+  setHighlight(null); selectPoint(null);
+  setUrl({ top: kind === "tree" ? "tree" : `${kind}:${by}` });
+  const chips = (list, on, attr) => `<div class="chips">${list.map(([k, label]) =>
+    `<button class="chip-btn${k === on ? " on" : ""}" data-${attr}="${k}" aria-pressed="${k === on}">${label}</button>`).join("")}</div>`;
+  const value = (r) => (by === "carbon" ? tonnes(r.carbon_kg) : fmt.format(by === "species" ? r.species_count : r.tree_count));
+  openPanel(`
+    <h2>${kind === "tree" ? "Widest tree trunks" : `${esc(TOP_KINDS.find(([k]) => k === kind)[1])}: ${esc(TOP_BYS.find(([b]) => b === by)[1].toLowerCase())}`}</h2>
+    <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump." : "Top 25 in Singapore"}</p>
+    ${chips(TOP_KINDS, kind, "kind")}
+    ${kind === "tree" ? "" : chips(TOP_BYS, by, "by")}
+    <ol class="list ranked">${kind === "tree"
+      ? d.trees.map((t) => `<li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}${t.ht_no ? " 🌟" : ""}${t.place ? ` <span class="muted">· ${esc(t.place)}</span>` : ""}</span>
+          <span class="meta">${Number(t.girth_m).toFixed(1)} m girth</span></button></li>`).join("")
+      : d.places.map((r) => `<li><button data-kind="${esc(r.kind)}" data-slug="${esc(r.slug)}"><span>${esc(r.name)}</span>
+          <span class="meta">${value(r)}${by === "carbon" ? "" : by === "species" ? " species" : " trees"}</span></button></li>`).join("")}</ol>
+    <div class="actions"><button class="btn" id="share">🔗 Share</button></div>`, { sheet: "half" });
+  body.querySelectorAll("button[data-kind].chip-btn").forEach((b) => b.addEventListener("click", () => openTop(b.dataset.kind, by)));
+  body.querySelectorAll("button[data-by]").forEach((b) => b.addEventListener("click", () => openTop(kind, b.dataset.by)));
+  body.querySelectorAll(".ranked button[data-kind]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.kind, b.dataset.slug)));
+  body.querySelectorAll(".ranked button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
   $("#share").addEventListener("click", share);
 }
 

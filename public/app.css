@@ -102,6 +102,13 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 .list li button { display: flex; width: 100%; gap: 8px; justify-content: space-between; align-items: center; border: 0;
   background: none; text-align: left; padding: 10px 6px; min-height: var(--tap); border-bottom: 1px solid var(--border); }
 .list li button:hover { background: var(--surface-2); }
+.list.ranked { counter-reset: rank; }
+.list.ranked li button::before { counter-increment: rank; content: counter(rank); flex: 0 0 22px; font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums; text-align: right; }
+.list.ranked li button > span:first-of-type { flex: 1; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.chip-btn { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 6px 12px; font-size: 13px; min-height: 34px; }
+.chip-btn.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .list .meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface);

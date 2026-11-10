@@ -41,6 +41,7 @@ const ALLOWED_PARAMS: Record<string, string[]> = {
   near: ["lat", "lng", "r", "limit"],
   place: ["species", "sort", "limit", "offset"],
   geocode: ["q"],
+  top: ["kind", "by"],
 };
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -311,6 +312,27 @@ async function apiSpecies(env: Env, id: number) {
   }, 200, 21600);
 }
 
+/** Rankings: places of one kind by trees / species / carbon, or the trees with the widest trunks. */
+const TOP_BY: Record<string, string> = { trees: "tree_count", species: "species_count", carbon: "carbon_kg" };
+async function apiTop(url: URL, env: Env) {
+  const kind = url.searchParams.get("kind") ?? "road";
+  if (kind === "tree") {
+    const { results } = await env.DB.prepare(
+      `SELECT t.id, t.lng, t.lat, t.girth_m, t.height_band, t.ht_no, s.common, s.scientific, p.name place
+         FROM trees t LEFT JOIN species s ON s.id=t.species_id LEFT JOIN places p ON p.id=coalesce(t.park_id, t.road_id)
+        WHERE t.girth_m IS NOT NULL AND coalesce(t.measure_flag, 0)=0 ORDER BY t.girth_m DESC LIMIT 25`,
+    ).all<Row>();
+    return json({ kind, by: "girth", trees: results }, 200, 21600);
+  }
+  const by = url.searchParams.get("by") ?? "trees";
+  if (!(kind in PLACE_COLUMN) || !(by in TOP_BY)) throw new HttpError(400, "invalid ranking");
+  // The column name comes from the fixed TOP_BY map, never from user input.
+  const { results } = await env.DB.prepare(
+    `SELECT kind, slug, name, tree_count, species_count, carbon_kg FROM places WHERE kind=? ORDER BY ${TOP_BY[by]} DESC LIMIT 25`,
+  ).bind(kind).all<Row>();
+  return json({ kind, by, places: results }, 200, 21600);
+}
+
 // ---------------------------------------------------------------- address search (OneMap)
 const ONEMAP = "https://www.onemap.gov.sg";
 let onemapToken: { value: string; exp: number } | null = null;
@@ -366,6 +388,7 @@ async function api(env: Env, url: URL): Promise<Response> {
   if (p[0] === "meta") return json((await getMeta(env)) ?? { built_at: null }, 200, 300);
   if (p[0] === "search") return apiSearch(url, env);
   if (p[0] === "near") return apiNear(url, env);
+  if (p[0] === "top") return apiTop(url, env);
   if (p[0] === "geocode") return apiGeocode(url, env);
   if (p[0] === "tree" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiTree(env, Number(p[1]));
   if (p[0] === "species" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiSpecies(env, Number(p[1]));
