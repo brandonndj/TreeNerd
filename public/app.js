@@ -133,10 +133,11 @@ map.on("load", async () => {
   map.addSource("trees", { type: "vector", url: `pmtiles://${location.origin}/data/trees.pmtiles?v=${v}`, promoteId: "id" });
   map.addLayer({
     id: "trees", type: "circle", source: "trees", "source-layer": "trees", filter: filterExpr(),
+    layout: { "circle-sort-key": ["-", 0, ["coalesce", ["get", "g"], 0]] }, // smaller girth drawn on top
     paint: {
       "circle-color": colorExpr(), "circle-radius": radiusExpr(), "circle-opacity": opacityExpr(),
       "circle-stroke-color": dark() ? "#0f1411" : "#ffffff",
-      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 14, 0, 16, 0.6],
+      "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 14, 0, 16, 0.6, 18, 1.2],
       "circle-stroke-opacity": opacityExpr(),
     },
   });
@@ -208,16 +209,52 @@ function wireMapEvents() {
   });
   map.on("mouseleave", "trees", () => { map.getCanvas().style.cursor = ""; hover.hidden = true; });
   map.on("click", (e) => {
-    // generous hit area so small dots are easy to tap
-    const r = matchMedia("(pointer: coarse)").matches ? 14 : 6;
-    const feats = map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ["trees"] });
-    if (feats.length) {
-      const f = feats.sort((a, b) => (b.properties.g || 0) - (a.properties.g || 0))[0];
-      return openTree(f.properties.id, true, true);
+    const cands = treesAt(e.point);
+    if (!cands.length) {
+      if (isPhone() && !panel.hidden) setSheet("peek");
+      else if (!isPhone() && !state.place && !state.species) closePanel();
+      return;
     }
-    if (isPhone() && !panel.hidden) setSheet("peek");
-    else if (!isPhone() && !state.place && !state.species) closePanel();
+    // trees that are about as close to the tap as the nearest one: the tap is ambiguous between them
+    const tied = cands.filter((c) => c.d <= cands[0].d + TIE_PX);
+    if (tied.length === 1) return openTree(cands[0].id, true, true);
+    if (map.getZoom() < 17) {
+      // too zoomed out to tell them apart: zoom in on the spot instead of guessing
+      return map.easeTo({ center: e.lngLat, zoom: Math.min(map.getZoom() + 2.5, 18.5), duration: 500 });
+    }
+    showTreesHere(tied.slice(0, 8));
   });
+}
+
+const TIE_PX = 6;
+/** Trees under/near a screen point, nearest first (by distance to the tree's centre, not its size). */
+function treesAt(point) {
+  const r = matchMedia("(pointer: coarse)").matches ? 16 : 8;
+  const feats = map.queryRenderedFeatures([[point.x - r, point.y - r], [point.x + r, point.y + r]], { layers: ["trees"] });
+  const byId = new Map();
+  for (const f of feats) {
+    const id = f.properties.id;
+    if (byId.has(id)) continue; // the same tree can appear in two tiles
+    const c = map.project(f.geometry.coordinates);
+    byId.set(id, { id, d: Math.hypot(c.x - point.x, c.y - point.y), s: f.properties.s, g: f.properties.g, h: f.properties.h,
+      lngLat: f.geometry.coordinates });
+  }
+  return [...byId.values()].sort((a, b) => a.d - b.d);
+}
+
+/** Several trees on (almost) the same spot: let the person pick. */
+function showTreesHere(trees) {
+  selectPoint(trees[0].lngLat);
+  openPanel(`
+    <h2>${trees.length} trees here</h2>
+    <p class="sub">They're too close together to tell apart. Pick one:</p>
+    <ul class="list">${trees.map((t) => {
+      const sp = state.speciesDict[t.s];
+      return `<li><button data-id="${Number(t.id)}"><span>${esc(sp?.n || sp?.sci || "Tree")}${sp?.n && sp?.sci ? ` <span class="muted sci">${esc(sp.sci)}</span>` : ""}</span>
+        <span class="meta">${[t.g ? `${(t.g / 100).toFixed(1)} m girth` : "", t.h ? `≤${Number(t.h)} m tall` : "", `#${Number(t.id)}`].filter(Boolean).join(" · ")}</span></button></li>`;
+    }).join("")}</ul>`, { sheet: "half" });
+  map.easeTo({ center: trees[0].lngLat, padding: panelPadding(), duration: 400 }); // keep the spot visible above the sheet
+  body.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id), false, true)));
 }
 
 // ------------------------------------------------------------------ legend
