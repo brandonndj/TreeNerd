@@ -214,6 +214,14 @@
           ]
         },
         "fallbackOnly": true
+      },
+      "mrt_exits": {
+        "id": "d_b39d3a0871985372d7e1637193335da5",
+        "required": false,
+        "fields": [
+          "STATION_NA",
+          "EXIT_CODE"
+        ]
       }
     },
     "realtimeApis": {
@@ -271,12 +279,32 @@
   "joins": {
     "roadMaxDistanceM": 30,
     "pcnMaxDistanceM": 15,
-    "heritageMatchM": 15
+    "heritageMatchM": 15,
+    "stationRadiusM": 250
   },
   "speciesReference": {
     "name": "World Checklist of Vascular Plants (WCVP)",
     "url": "https://sftp.kew.org/pub/data-repositories/WCVP/wcvp.zip",
     "attribution": "WCVP, World Checklist of Vascular Plants. Facilitated by the Royal Botanic Gardens, Kew (CC BY 4.0)",
     "use": "Fills species family and (non-native only) origin where NParks has none; gated by an accuracy check against NParks labels"
+  },
+  "woodDensity": {
+    "name": "Global Wood Density Database v.2 (GWDD v2.2)",
+    "doi": "10.5281/zenodo.20815517",
+    "files": {
+      "binomial": {
+        "url": "https://zenodo.org/api/records/20815517/files/gwddagg_v2.2_binomial.csv/content",
+        "md5": "2ce721e791fca2b5eb17c31f81a59228"
+      },
+      "genus": {
+        "url": "https://zenodo.org/api/records/20815517/files/gwddagg_v2.2_genus.csv/content",
+        "md5": "f9e7ccb930ffa22a433ec2f19af035bb"
+      }
+    },
+    "attribution": "Wood density: Global Wood Density Database v.2, Fischer et al. 2026 (CC BY 4.0)",
+    "use": "Per-species (else per-genus) wood density for the carbon estimate; other trees use the average of the matched trees"
+  },
+  "previousBuild": {
+    "use": "The last published build (trees.csv.gz, meta.json, changes.json), used to list trees added to or removed from the records. Supplied by the workflow from storage; optional."
   }
 }

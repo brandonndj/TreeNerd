@@ -1,4 +1,4 @@
-// Typo-tolerant search over roads, parks, areas, PCN loops, constituencies and species.
+// Typo-tolerant search over roads, parks, areas, PCN loops, constituencies, MRT stations and species.
 // The index (search.json, ~1 MB) is built by the pipeline, stored in R2 and kept in isolate memory.
 
 export interface Entry {
@@ -8,6 +8,7 @@ export interface Entry {
   a?: string[]; // alternative names
   c: number; // tree count
   b?: number[] | null; // bbox
+  ll?: number[]; // [lat, lng] for point targets (MRT stations)
 }
 
 interface Indexed extends Entry {
@@ -27,7 +28,7 @@ const ABBREV: Record<string, string> = {
 
 const KIND_WEIGHT: Record<string, number> = {
   road: 1, park: 0.97, species: 0.95, planning_area: 0.93, subzone: 0.85,
-  heritage_road: 0.9, pcn: 0.9, constituency: 0.8,
+  heritage_road: 0.9, pcn: 0.9, constituency: 0.8, mrt: 0.9,
 };
 
 export function normalise(s: string): string[] {
@@ -103,6 +104,7 @@ export class SearchIndex {
     out.sort((a, b) => b.score - a.score);
     return out.slice(0, limit).map(({ e, score }) => ({
       kind: e.k, slug: e.s, name: e.n, alt: e.a?.slice(0, 3) ?? [], count: e.c, bbox: e.b ?? null,
+      ...(e.ll ? { lat: e.ll[0], lng: e.ll[1] } : {}),
       score: Math.round(score * 100) / 100,
     }));
   }

@@ -17,7 +17,7 @@ const CATS = [
 ];
 const KIND_LABEL = {
   road: "Road", park: "Park", subzone: "Subzone", planning_area: "Planning area", pcn: "Park connector",
-  constituency: "Constituency", heritage_road: "Heritage road", species: "Species", address: "Address",
+  constituency: "Constituency", heritage_road: "Heritage road", species: "Species", address: "Address", mrt: "Station",
 };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const catColor = (key) => css(`--c-${key}`);
@@ -352,11 +352,12 @@ const SUGGESTIONS = [
   { kind: "top", top: "park", name: "Parks with the most trees" },
   { kind: "top", top: "planning_area", name: "Areas with the most trees" },
   { kind: "top", top: "tree", name: "Widest tree trunks in Singapore" },
+  { kind: "top", top: "changes", name: "Trees added and removed lately", badge: "New" },
 ];
 function showSuggestions() {
   items = SUGGESTIONS; active = -1;
   results.innerHTML = `<li class="group" role="presentation">Explore</li>` + items.map((r, i) => `
-    <li role="option" id="opt-${i}" aria-selected="false"><span class="badge">Top</span><span class="r-name">${esc(r.name)}</span></li>`).join("");
+    <li role="option" id="opt-${i}" aria-selected="false"><span class="badge">${r.badge || "Top"}</span><span class="r-name">${esc(r.name)}</span></li>`).join("");
   wireResults();
   showResults();
 }
@@ -403,9 +404,10 @@ function showResults() { results.hidden = false; q.setAttribute("aria-expanded",
 function hideResults() { results.hidden = true; q.setAttribute("aria-expanded", "false"); q.removeAttribute("aria-activedescendant"); }
 function choose(r) {
   hideResults();
-  if (r.kind === "top") { q.blur(); return openTop(r.top); }
+  if (r.kind === "top") { q.blur(); return r.top === "changes" ? openChanges() : openTop(r.top); }
   q.value = r.name; $("#clear").hidden = false; q.blur();
   if (r.kind === "address") nearby(r.lat, r.lng, 150, { title: r.name, sub: r.address });
+  else if (r.kind === "mrt") nearby(r.lat, r.lng, 250, { title: r.name, sub: "Station" });
   else if (r.kind === "species") openSpecies(r.slug);
   else openPlace(r.kind, r.slug, r.bbox);
 }
@@ -499,6 +501,7 @@ function restoreFromUrl(hasView = INITIAL_VIEW) {
   const u = new URL(location.href);
   const p = u.searchParams.get("p"), s = u.searchParams.get("s"), t = u.searchParams.get("t");
   const top = u.searchParams.get("top");
+  if (top === "changes") return openChanges();
   if (top) { const [kind, by] = top.split(":"); return openTop(kind, by); }
   if (!p && !s) state.place = state.species = null;
   if (!t) selectPoint(null);
@@ -587,6 +590,7 @@ function renderPlace(d) {
     <div id="place-species">${barList(species, d.tree_count, { onclick: true, active: state.placeSpecies })}</div>
     <h3>Largest trees</h3>
     <ul class="list" id="tree-list"></ul>
+    ${changesSection(d.changes)}
     <div class="actions">
       <button class="btn" id="more">Show more</button>
       <a class="btn" href="/api/place/${encodeURIComponent(d.kind)}/${encodeURIComponent(d.slug)}/trees.csv${state.placeSpecies ? `?species=${state.placeSpecies}` : ""}" download>⬇ CSV</a>
@@ -599,6 +603,7 @@ function renderPlace(d) {
     renderPlace(d);
   }));
   $("#share").addEventListener("click", share);
+  wireChangeRows();
   loadTreeList(d, 0);
   $("#more").addEventListener("click", () => loadTreeList(d, $("#tree-list").children.length));
 }
@@ -645,6 +650,7 @@ async function openSpecies(id, fly = true) {
       ${s.growth_form ? `<dt>Growth form</dt><dd>${esc(s.growth_form)}</dd>` : ""}
       ${s.native_distribution ? `<dt>Native range</dt><dd>${esc(s.native_distribution)}</dd>` : ""}
       ${s.conservation_status ? `<dt>Status</dt><dd>${esc(s.conservation_status)}</dd>` : ""}
+      ${s.wood_density ? `<dt>Wood density</dt><dd>${Number(s.wood_density).toFixed(2)} g/cm³ <span class="muted">(${s.wood_density_src === "genus" ? "average for its genus" : "this species"})</span></dd>` : ""}
       ${s.aliases?.length ? `<dt>Also called</dt><dd>${esc(s.aliases.slice(0, 8).join(", "))}</dd>` : ""}
     </dl>
     ${sources.length ? `<p class="note">NParks doesn't list this species' ${sources.join(" or ")}; shown from Kew's World Checklist of Vascular Plants.</p>` : ""}
@@ -715,7 +721,7 @@ async function openTree(id, fly = true, keepContext = false) {
       <a class="btn" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${Number(t.lat)},${Number(t.lng)}" target="_blank" rel="noopener noreferrer">Street View ↗</a>
       <button class="btn" id="share">🔗 Share</button>
     </div>
-    <p class="note">Carbon is an allometric estimate (Chave et al. 2014) from girth and height band.</p>`, { sheet: "half" });
+    <p class="note">Carbon is an allometric estimate (Chave et al. 2014) from girth, height band and wood density${s.wood_density ? ` (${Number(s.wood_density).toFixed(2)} g/cm³, ${s.wood_density_src === "genus" ? "the average for its genus" : "for this species"})` : state.meta?.wood_density ? ` (${Number(state.meta.wood_density.default).toFixed(2)} g/cm³, the average across Singapore's trees)` : ""}.</p>`, { sheet: "half" });
   if (fly) map.easeTo({ center: [t.lng, t.lat], zoom: Math.max(map.getZoom(), 18), padding: panelPadding(), duration: 700 });
   $("#back")?.addEventListener("click", () => state.place ? renderPlace(state.place) : openSpecies(state.species.id, false));
   $("#sp")?.addEventListener("click", () => openSpecies(s.id));
@@ -762,6 +768,55 @@ async function nearby(lat, lng, r = 150, label = null) {
   map.easeTo({ center: [lng, lat], zoom: r > 300 ? 16.2 : 17.2, padding: panelPadding() });
   body.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
   body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
+  $("#share").addEventListener("click", share);
+}
+
+// ---- changes: trees added to / no longer in NParks' records
+const changeRow = (c) => `<li><button data-change="${c.change === "added" ? "added" : "removed"}" data-id="${Number(c.tree_id)}" data-lng="${Number(c.lng)}" data-lat="${Number(c.lat)}">
+  <span><span class="delta ${c.change === "added" ? "plus" : "minus"}">${c.change === "added" ? "+" : "−"}</span> ${esc(c.common || c.scientific || "Tree")}${c.place ? ` <span class="muted">· ${esc(c.place)}</span>` : ""}</span>
+  <span class="meta">${c.girth_m ? `${Number(c.girth_m).toFixed(1)} m · ` : ""}${esc(fmtDate(c.seen))}</span></button></li>`;
+const CHANGE_NOTE = `<p class="note">Compared with NParks' records at each update. A tree that's no longer listed isn't always felled; it may have been re-recorded.</p>`;
+function changesSection(rows) {
+  if (!rows) return ""; // not tracked for this kind of place
+  const added = rows.filter((c) => c.change === "added").length, removed = rows.length - added;
+  if (!rows.length) return `<h3>Recent changes</h3><p class="muted">No trees added or removed in the last 6 months of updates.</p>`;
+  return `<h3>Recent changes</h3>
+    <p><span class="delta plus">+${fmt.format(added)}</span> added · <span class="delta minus">−${fmt.format(removed)}</span> no longer listed</p>
+    <details class="changes"><summary>Show them</summary><ul class="list">${rows.slice(0, 100).map(changeRow).join("")}</ul>${CHANGE_NOTE}</details>`;
+}
+function wireChangeRows() {
+  body.querySelectorAll("button[data-change]").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.change === "added") return openTree(Number(b.dataset.id), true, true);
+    const at = [Number(b.dataset.lng), Number(b.dataset.lat)]; // the tree is gone: show where it stood
+    if (!at.every(Number.isFinite)) return;
+    selectPoint(at);
+    map.easeTo({ center: at, zoom: Math.max(map.getZoom(), 18), padding: panelPadding(), duration: 700 });
+    if (isPhone()) setSheet("peek");
+  }));
+}
+async function openChanges() {
+  openPanel(`<p class="muted" role="status">Loading…</p>`, { sheet: "half" });
+  let d;
+  try { d = await api("/api/changes"); }
+  catch (e) { return openPanel(`<h2>Recent changes</h2><p class="muted">${esc(e.message)}</p>`); }
+  state.place = state.species = null;
+  setHighlight(null); selectPoint(null);
+  setUrl({ top: "changes" });
+  const byBuild = new Map();
+  for (const b of d.builds) {
+    const row = byBuild.get(b.seen) || { seen: b.seen, since: b.since, added: 0, removed: 0 };
+    row[b.change === "added" ? "added" : "removed"] = b.n;
+    byBuild.set(b.seen, row);
+  }
+  openPanel(`
+    <h2>Recent changes</h2>
+    <p class="sub">Trees added to, or no longer in, NParks' records</p>
+    ${byBuild.size ? `<ul class="list plain">${[...byBuild.values()].map((b) => `<li><span>${esc(fmtDate(b.seen))}${b.since ? ` <span class="muted">since ${esc(fmtDate(b.since))}</span>` : ""}</span>
+        <span class="meta"><span class="delta plus">+${fmt.format(b.added)}</span> · <span class="delta minus">−${fmt.format(b.removed)}</span></span></li>`).join("")}</ul>
+      <h3>Latest</h3><ul class="list">${d.trees.slice(0, 150).map(changeRow).join("")}</ul>${CHANGE_NOTE}`
+    : `<p class="muted">Nothing yet. TreeNerd compares NParks' records at every update, so changes will appear here after the next one.</p>`}
+    <div class="actions"><button class="btn" id="share">🔗 Share</button></div>`, { sheet: "half" });
+  wireChangeRows();
   $("#share").addEventListener("click", share);
 }
 
@@ -816,12 +871,15 @@ $("#about").addEventListener("click", () => {
         <li>Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors (ODbL)</li>
         <li>Basemap and address search: <a href="https://www.onemap.gov.sg" target="_blank" rel="noopener noreferrer">OneMap</a> © Singapore Land Authority</li>
         <li>Missing species families and origins: <a href="https://powo.science.kew.org/about-wcvp" target="_blank" rel="noopener noreferrer">World Checklist of Vascular Plants</a>, Royal Botanic Gardens, Kew (CC BY 4.0)</li>
+        <li>Wood density: <a href="https://doi.org/10.5281/zenodo.16919509" target="_blank" rel="noopener noreferrer">Global Wood Density Database v.2</a>, Fischer et al. 2026 (CC BY 4.0)</li>
+        <li>MRT and LRT stations: Land Transport Authority, via data.gov.sg</li>
       </ul>
       ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. It refreshes automatically.</p>` : ""}
       <h3>How it's worked out</h3>
       <ul>
         <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
-        <li><b>Carbon</b> is an estimate from girth and height (Chave et al. 2014), not a measurement.</li>
+        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement.</li>
+        <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>

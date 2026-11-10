@@ -160,7 +160,10 @@ def implausible_measurements(girth_m, height_m, scientific, family):
     return girth_m / math.pi > 0.3 * height_m
 
 
-def carbon_estimate(girth_m, height_m, wood_density=0.6):
+DEFAULT_WOOD_DENSITY = 0.6  # g/cm3, used only when no wood density table is available
+
+
+def carbon_estimate(girth_m, height_m, wood_density=DEFAULT_WOOD_DENSITY):
     """Chave et al. 2014 pantropical AGB; carbon = 47% of biomass. Rough estimate."""
     if not girth_m or girth_m <= 0:
         return None
@@ -401,6 +404,34 @@ def main():
     enrichment_report = {**acc, "filled_family": fill_family, "filled_origin": fill_origin,
                          "family_from_wcvp": sum(1 for s in species.values() if s.get("family_src")),
                          "origin_from_wcvp": sum(1 for s in species.values() if s.get("native_src"))}
+
+    # ---- wood density per species (for the carbon estimate) ------------------------------
+    from .enrich import parse
+    from .wood import WoodDensity
+    wd = WoodDensity.load()
+    for sid, s in species.items():
+        s["wood_density"], s["wood_density_src"] = None, None
+        p = parse(raw_names.get(sid) or s.get("scientific") or "") if wd else None
+        if not p:
+            continue
+        names = [(p["genus"], p["species"])]  # the name as recorded, then Kew's accepted name for it
+        if p["species"]:
+            pid, _ = w.resolve(p)
+            if pid:
+                names.append((w.rows[pid]["genus"], w.rows[pid]["species"]))
+        s["wood_density"], s["wood_density_src"] = wd.lookup(names)
+    per_species = Counter(t["species_id"] for t in trees)
+    matched = [(n, species[sid]["wood_density"]) for sid, n in per_species.items()
+               if sid in species and species[sid]["wood_density"]]
+    n_matched = sum(n for n, _ in matched)
+    default_density = round(sum(n * v for n, v in matched) / n_matched, 2) if n_matched else DEFAULT_WOOD_DENSITY
+    density_report = {
+        "default": default_density,
+        "trees_by_species": sum(n for sid, n in per_species.items() if sid in species and species[sid]["wood_density_src"] == "species"),
+        "trees_by_genus": sum(n for sid, n in per_species.items() if sid in species and species[sid]["wood_density_src"] == "genus"),
+        "trees_by_default": len(trees) - n_matched,
+    }
+    log(f"wood density: {density_report}")
     del w
 
     pts = to_svy21(shapely.points([(t["lng"], t["lat"]) for t in trees]))
@@ -529,7 +560,8 @@ def main():
             cat = "G1" if g < 0.5 else "G2" if g <= 1.0 else "G3" if g <= 1.5 else "G4"
         # NParks' table (40 species x 4 girth classes) has undocumented units, so it is kept
         # as a raw reference value; carbon_kg is always the allometric estimate.
-        return carbon_estimate(t["girth_m"], t["height_m"]), carbon_table.get((t["species_id"], cat))
+        density = (species.get(t["species_id"]) or {}).get("wood_density") or default_density
+        return carbon_estimate(t["girth_m"], t["height_m"], density), carbon_table.get((t["species_id"], cat))
 
     stats = defaultdict(lambda: {"n": 0, "species": Counter(), "heritage": 0, "carbon": 0.0,
                                  "bbox": [999, 999, -999, -999]})
@@ -585,8 +617,32 @@ def main():
         if seen[(p["kind"], p["slug"])] > 1:
             p["slug"] = f"{p['slug']}-{seen[(p['kind'], p['slug'])]}"
 
+    # ---- MRT / LRT stations: search targets ("trees near Bishan MRT") -----------------------
+    stations = []
+    by_station = defaultdict(list)
+    for f in load_fc("dgs_mrt_exits.geojson", required=False):
+        name = (f["properties"].get("STATION_NA") or "").strip()
+        if name and f["geometry"]["type"] == "Point":
+            by_station[name].append(f["geometry"]["coordinates"][:2])
+    if by_station:
+        names = sorted(by_station)
+        centres = [(sum(x for x, _ in by_station[n]) / len(by_station[n]),
+                    sum(y for _, y in by_station[n]) / len(by_station[n])) for n in names]
+        radius = JOINS.get("stationRadiusM", 250)
+        si, _ = shapely.STRtree(pts).query(to_svy21(shapely.points(centres)), predicate="dwithin", distance=radius)
+        counts = Counter(si.tolist())
+        used = Counter()
+        for i, n in enumerate(names):
+            label = title(n).replace(" Mrt ", " MRT ").replace(" Lrt ", " LRT ")
+            slug = slugify(label)
+            used[slug] += 1
+            stations.append({"slug": slug if used[slug] == 1 else f"{slug}-{used[slug]}", "name": label,
+                             "count": counts.get(i, 0), "lat": round(centres[i][1], 5), "lng": round(centres[i][0], 5)})
+        log(f"stations: {len(stations)} MRT/LRT stations (trees within {radius} m)")
+
     # ---- outputs ---------------------------------------------------------------
-    write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report)
+    write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report,
+                  stations=stations, density_report=density_report)
 
 
 TILE_KEYS = {"road": "r", "park": "p", "planning_area": "a", "subzone": "u", "constituency": "e"}
@@ -597,7 +653,8 @@ def cell_of(lat, lng):
     return int((lat - 1.1) * 500) * 1000 + int((lng - 103.5) * 500)
 
 
-def write_outputs(trees, species, places, road_source, source_edit, t0, enrichment=None):
+def write_outputs(trees, species, places, road_source, source_edit, t0, enrichment=None, stations=(),
+                  density_report=None):
     log("write: trees.geojsonl (tiles)")
     with open(OUT / "trees.geojsonl", "w") as fh:
         for t in trees:
@@ -620,11 +677,11 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     schema = (Path(__file__).resolve().parent.parent / "schema.sql").read_text()
     tables = re.sub(r"CREATE (UNIQUE )?INDEX[^;]+;\s*", "", schema)
     drop = "".join(f"DROP TABLE IF EXISTS {t};\n" for t in
-                   ("trees_new", "species_new", "places_new", "trees", "species", "places"))
+                   ("trees_new", "species_new", "places_new", "trees", "species", "places", "changes"))
     w.raw(drop + tables + "DELETE FROM meta WHERE key='build';\n", "tables")
     sp_cols = ["id", "master_id", "scientific", "common", "aliases", "family", "growth_form",
                "native_distribution", "conservation_status", "native", "ffw_url", "tree_count",
-               "family_src", "native_src"]
+               "family_src", "native_src", "wood_density", "wood_density_src"]
     w.insert("species", sp_cols, ([s.get(c) for c in sp_cols] for s in species.values() if s["tree_count"]))
     pl_cols = ["id", "kind", "slug", "name", "alt", "tree_count", "species_count", "heritage_count",
                "carbon_kg", "bbox", "top_species", "extra"]
@@ -635,6 +692,26 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
                "land_use", "ht_no", "ht_url", "ht_desc", "carbon_kg", "carbon_nparks", "last_edited", "measure_flag"]
     w.insert("trees", tr_cols, ([t[c] for c in tr_cols] for t in trees))
     built = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    # trees added to / gone from the records since the previous build (see pipeline/changes.py)
+    from . import changes as ch
+    prev = ch.read_previous()
+    change_summary = None
+    new_rows = []
+    if prev is not None:
+        new_rows, change_summary = ch.diff(prev, trees, species, places, seen=built[:10],
+                                           since=(ch.previous_built_at() or "")[:10] or None)
+        log(f"changes: {change_summary}")
+    else:
+        log("  (no previous build to compare with: no changes logged)")
+    del prev
+    change_log = ch.merge(ch.load_log(), new_rows, built[:10])
+    write_json(OUT / "changes.json", change_log)
+    place_id = {(p["kind"], p["slug"]): p["id"] for p in places}
+    ch_cols = ["tree_id", "change", "seen", "since", "lng", "lat", "common", "scientific", "girth_m",
+               "road_id", "park_id", "subzone_id", "pa_id", "ed_id"]
+    w.insert("changes", ch_cols, ([*(r.get(c) for c in ch_cols[:9]),
+                                   *(place_id.get((kind, r.get(kind))) for kind in ch.PLACE_KEYS)] for r in change_log))
     meta = {
         "built_at": built, "tree_count": len(trees), "species_count": sum(1 for s in species.values() if s["tree_count"]),
         "place_counts": dict(Counter(p["kind"] for p in places)),
@@ -642,12 +719,16 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
         "with_road": sum(1 for t in trees if t["road_id"]),
         "measurement_flags": sum(t["measure_flag"] for t in trees),
         "road_source": road_source,
+        "wood_density": density_report,
+        "changes": change_summary,
+        "stations": len(stations),
         # place kinds whose id is a property of every tree in the tiles (the app highlights by it)
         "tile_keys": TILE_KEYS,
         "species_enrichment": {k: v for k, v in (enrichment or {}).items() if k != "family_differences"},
         "source_last_edit": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(source_edit / 1000)) if source_edit else None,
         "attribution": [SOURCES["arcgis"]["attribution"], SOURCES["datagovsg"]["attribution"],
                         "Species family/origin gaps: WCVP, World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0)",
+                        *([SOURCES["woodDensity"]["attribution"]] if density_report and density_report["trees_by_default"] < len(trees) else []),
                         SOURCES["roads"]["primary"]["attribution"] if road_source == "osm"
                         else "Contains information from SLA National Map"],
     }
@@ -661,6 +742,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     search += [{"k": "species", "s": str(s["id"]), "n": s["common"] or s["scientific"],
                 "a": [x for x in [s["scientific"], s["family"], *s["aliases"]] if x], "c": s["tree_count"]}
                for s in species.values() if s["tree_count"]]
+    search += [{"k": "mrt", "s": st["slug"], "n": st["name"], "a": [], "c": st["count"], "ll": [st["lat"], st["lng"]]}
+               for st in stations]
     write_json(OUT / "search.json", search)
     write_json(OUT / "species.json", {str(s["id"]): {
         "n": s["common"], "sci": s["scientific"], "fam": s["family"], "nat": s["native"], "c": s["tree_count"]}

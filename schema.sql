@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS species (
   ffw_url TEXT,
   tree_count INTEGER,
   family_src TEXT,                  -- NULL = NParks; wcvp | wcvp-genus | nparks-genus | override
-  native_src TEXT                   -- NULL = NParks; wcvp (native range entirely outside Asia) | override
+  native_src TEXT,                  -- NULL = NParks; wcvp (native range entirely outside Asia) | override
+  wood_density REAL,                -- g/cm3, Global Wood Density Database v.2; NULL = the build's average is used
+  wood_density_src TEXT             -- species | genus
 );
 
 CREATE TABLE IF NOT EXISTS places (
@@ -80,5 +82,24 @@ CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id);
 CREATE INDEX IF NOT EXISTS idx_trees_species ON trees(species_id);
 CREATE INDEX IF NOT EXISTS idx_trees_cell ON trees(cell);
 CREATE INDEX IF NOT EXISTS idx_trees_girth ON trees(girth_m);
+
+-- Trees added to / no longer in NParks' records, per build that noticed (rolling ~6 months).
+CREATE TABLE IF NOT EXISTS changes (
+  tree_id INTEGER NOT NULL,
+  change TEXT NOT NULL,             -- added | removed
+  seen TEXT NOT NULL,               -- date of the build that noticed
+  since TEXT,                       -- date of the build it was compared with
+  lng REAL,
+  lat REAL,
+  common TEXT,
+  scientific TEXT,
+  girth_m REAL,
+  road_id INTEGER,
+  park_id INTEGER,
+  subzone_id INTEGER,
+  pa_id INTEGER,
+  ed_id INTEGER,
+  PRIMARY KEY (tree_id, change, seen)
+);
 
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);

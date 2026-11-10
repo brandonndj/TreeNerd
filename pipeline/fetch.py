@@ -1,6 +1,6 @@
 """Download every raw source listed in data/sources.json into build/raw/.
 
-Usage:  python -m pipeline.fetch [trees|tables|datagovsg|roads|wcvp|all]
+Usage:  python -m pipeline.fetch [trees|tables|datagovsg|roads|wcvp|wood|all]
 """
 from __future__ import annotations
 
@@ -182,11 +182,18 @@ def fetch_species_reference():
     log(f"WCVP: {WCVP_ZIP.stat().st_size / 1e6:.0f} MB")
 
 
+def fetch_wood_density():
+    """Global Wood Density Database: per-species wood density for the carbon estimate (see pipeline/wood.py)."""
+    from . import wood
+    wood.fetch()
+
+
 def main(argv):
     what = argv[1] if len(argv) > 1 else "all"
     RAW.mkdir(parents=True, exist_ok=True)
     steps = {"trees": fetch_trees, "tables": fetch_tables,
-             "datagovsg": fetch_datagovsg, "roads": fetch_roads, "wcvp": fetch_species_reference}
+             "datagovsg": fetch_datagovsg, "roads": fetch_roads, "wcvp": fetch_species_reference,
+             "wood": fetch_wood_density}
     for name, fn in steps.items():
         if what in (name, "all"):
             fn()

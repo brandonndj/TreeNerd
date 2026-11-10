@@ -13,6 +13,7 @@ const idx = new SearchIndex([
   { k: "road", s: "bishan-street-23", n: "Bishan Street 23", c: 300 },
   { k: "species", s: "3106", n: "Rain Tree", a: ["Samanea saman", "Fabaceae", "雨树"], c: 54382 },
   { k: "park", s: "pasir-ris-park", n: "Pasir Ris Park", c: 5381 },
+  { k: "mrt", s: "bishan-mrt-station", n: "Bishan MRT Station", c: 296, ll: [1.3509, 103.8485] },
 ]);
 const top = (q) => idx.search(q, { limit: 3 })[0]?.slug;
 
@@ -39,4 +40,14 @@ test("species by common, scientific and Chinese names", () => {
 test("prefix while typing and no false positives", () => {
   assert.equal(top("pasir r"), "pasir-ris-park");
   assert.equal(idx.search("zzzz").length, 0);
+});
+
+test("stations are point targets with coordinates", () => {
+  const hit = idx.search("bishan mrt", { limit: 3 })[0];
+  assert.equal(hit.kind, "mrt");
+  assert.deepEqual([hit.lat, hit.lng], [1.3509, 103.8485]);
+  // a street search still prefers the street
+  assert.equal(top("bishan st 22"), "bishan-street-22");
+  // places without coordinates don't gain the fields
+  assert.equal("lat" in idx.search("orchard road")[0], false);
 });

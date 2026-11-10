@@ -1,7 +1,8 @@
 /**
  * TreeNerd Worker
  *  - serves the static front end (public/) via Workers Static Assets
- *  - /data/*  -> R2 objects (PMTiles with HTTP Range, search/species/meta JSON, CSV export)
+ *  - /data/*  -> R2 objects (CSV export, tile archive, search/species/meta/changes JSON)
+ *  - /tiles/* -> vector tiles read from the PMTiles archive in R2 (see tiles.ts)
  *  - /api/*   -> D1 queries + in-memory search index, rate-limited and edge-cached per data build
  *  - cron     -> checks the upstream source for new data and requests a rebuild
  */
@@ -30,7 +31,11 @@ const PLACE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id",
   pcn: "pcn_id", constituency: "ed_id", heritage_road: "hr_id",
 };
-const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz"]);
+const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json"]);
+// Place columns present in the changes table (trees added to / gone from the records).
+const CHANGE_COLUMN: Record<string, string> = {
+  road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id", constituency: "ed_id",
+};
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,119}$/;
 const ID_RE = /^\d{1,12}$/;
 
@@ -42,6 +47,7 @@ const ALLOWED_PARAMS: Record<string, string[]> = {
   place: ["species", "sort", "limit", "offset"],
   geocode: ["q"],
   top: ["kind", "by"],
+  changes: [],
 };
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -177,7 +183,7 @@ async function getPlace(env: Env, kind: string, slug: string) {
 // ---------------------------------------------------------------- API routes
 async function apiSearch(url: URL, env: Env) {
   const q = (url.searchParams.get("q") ?? "").slice(0, 100);
-  const kinds = url.searchParams.get("kind")?.split(",").filter((k) => k in PLACE_COLUMN || k === "species").slice(0, 8);
+  const kinds = url.searchParams.get("kind")?.split(",").filter((k) => k in PLACE_COLUMN || k === "species" || k === "mrt").slice(0, 8);
   const idx = await getSearch(env);
   return json({ q, results: idx.search(q, { kinds: kinds?.length ? kinds : undefined, limit: intParam(url, "limit", 12, 1, 50) }) });
 }
@@ -197,6 +203,7 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   // which place ids are in the tiles depends on the data build (older builds have fewer)
   const tileKeys = ((await getMeta(env))?.tile_keys ?? { road: "r", park: "p", planning_area: "a" }) as Record<string, string>;
   return json({
+    changes: await placeChanges(env, kind, place.id as number),
     kind, slug, name: place.name, alt: parseJSON(place.alt, []),
     tree_count: place.tree_count, species_count: place.species_count,
     heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
@@ -312,6 +319,37 @@ async function apiSpecies(env: Env, id: number) {
   }, 200, 21600);
 }
 
+/** Trees added to / no longer in the records for one place. Builds made before this feature have no table. */
+async function placeChanges(env: Env, kind: string, id: number) {
+  const col = CHANGE_COLUMN[kind];
+  if (!col) return null;
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT tree_id, change, seen, since, lng, lat, common, scientific, girth_m FROM changes
+        WHERE ${col}=? ORDER BY seen DESC, change, tree_id LIMIT 300`,
+    ).bind(id).all<Row>();
+    return results;
+  } catch {
+    return null;
+  }
+}
+
+/** Recent changes across Singapore: a count per build, and the latest trees. */
+async function apiChanges(env: Env) {
+  try {
+    const [builds, rows] = await env.DB.batch<Row>([
+      env.DB.prepare("SELECT seen, since, change, count(*) n FROM changes GROUP BY seen, since, change ORDER BY seen DESC LIMIT 60"),
+      env.DB.prepare(
+        `SELECT c.tree_id, c.change, c.seen, c.lng, c.lat, c.common, c.scientific, c.girth_m, p.name place
+           FROM changes c LEFT JOIN places p ON p.id=coalesce(c.park_id, c.road_id)
+          ORDER BY c.seen DESC, c.change, c.tree_id LIMIT 300`),
+    ]);
+    return json({ builds: builds.results, trees: rows.results }, 200, 3600);
+  } catch {
+    return json({ builds: [], trees: [] }, 200, 300);
+  }
+}
+
 /** Rankings: places of one kind by trees / species / carbon, or the trees with the widest trunks. */
 const TOP_BY: Record<string, string> = { trees: "tree_count", species: "species_count", carbon: "carbon_kg" };
 async function apiTop(url: URL, env: Env) {
@@ -389,6 +427,7 @@ async function api(env: Env, url: URL): Promise<Response> {
   if (p[0] === "search") return apiSearch(url, env);
   if (p[0] === "near") return apiNear(url, env);
   if (p[0] === "top") return apiTop(url, env);
+  if (p[0] === "changes" && p.length === 1) return apiChanges(env);
   if (p[0] === "geocode") return apiGeocode(url, env);
   if (p[0] === "tree" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiTree(env, Number(p[1]));
   if (p[0] === "species" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiSpecies(env, Number(p[1]));
