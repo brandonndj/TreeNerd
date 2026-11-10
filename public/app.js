@@ -23,6 +23,19 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 const catColor = (key) => css(`--c-${key}`);
 const isPhone = () => innerWidth <= 720;
 
+// ------------------------------------------------------------------ dev preview banner (dev.treenerd.fyi)
+if (location.hostname.startsWith("dev.")) {
+  document.documentElement.classList.add("is-dev");
+  document.title = `[DEV] ${document.title}`;
+  const bar = document.createElement("div");
+  bar.className = "dev-banner"; bar.setAttribute("role", "note");
+  const live = document.createElement("a");
+  live.href = `https://treenerd.fyi/${location.search}${location.hash}`;
+  live.textContent = "Open the live site";
+  bar.append("DEV PREVIEW · not the live site · ", live);
+  document.body.prepend(bar);
+}
+
 // ------------------------------------------------------------------ theme: follows the device until toggled
 // "auto" = follow the device. Clicking switches to the opposite of what's showing; switching back to
 // what the device uses returns to "auto", so later device changes are followed again.
