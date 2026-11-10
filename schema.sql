@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS species (
   conservation_status TEXT,
   native INTEGER,                   -- 1 native, 0 non-native, NULL unknown
   ffw_url TEXT,
-  tree_count INTEGER
+  tree_count INTEGER,
+  family_src TEXT,                  -- NULL = NParks; wcvp | wcvp-genus | nparks-genus | override
+  native_src TEXT                   -- NULL = NParks; wcvp (native range entirely outside Asia) | override
 );
 
 CREATE TABLE IF NOT EXISTS places (

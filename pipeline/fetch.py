@@ -1,6 +1,6 @@
 """Download every raw source listed in data/sources.json into build/raw/.
 
-Usage:  python -m pipeline.fetch [trees|tables|datagovsg|roads|all]
+Usage:  python -m pipeline.fetch [trees|tables|datagovsg|roads|wcvp|all]
 """
 from __future__ import annotations
 
@@ -175,11 +175,18 @@ def extract_osm_roads(pbf, dest):
     log(f"OSM: {len(feats):,} named road ways")
 
 
+def fetch_species_reference():
+    """Kew's World Checklist of Vascular Plants: fills species family/origin gaps (see pipeline/enrich.py)."""
+    from .enrich import WCVP_ZIP, WCVP_URL
+    WCVP_ZIP.write_bytes(http(WCVP_URL, timeout=900))
+    log(f"WCVP: {WCVP_ZIP.stat().st_size / 1e6:.0f} MB")
+
+
 def main(argv):
     what = argv[1] if len(argv) > 1 else "all"
     RAW.mkdir(parents=True, exist_ok=True)
     steps = {"trees": fetch_trees, "tables": fetch_tables,
-             "datagovsg": fetch_datagovsg, "roads": fetch_roads}
+             "datagovsg": fetch_datagovsg, "roads": fetch_roads, "wcvp": fetch_species_reference}
     for name, fn in steps.items():
         if what in (name, "all"):
             fn()

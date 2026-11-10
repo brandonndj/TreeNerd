@@ -316,6 +316,7 @@ def main():
 
     # ---- trees ------------------------------------------------------------
     log("trees: load")
+    raw_sci = defaultdict(Counter)  # species id -> scientific names (with authors) as written on trees
     raw = read_json(RAW / "arcgis_trees.geojson")
     source_edit = raw.get("lastEditDate")
     trees, seen_id, seen_xy = [], set(), set()
@@ -337,6 +338,8 @@ def main():
         hb, hm = norm_height(p.get("HEIGHT"))
         cat = CATEGORY.get(p.get("GIS_Layer") or "", "user" if p.get("Type") == "USERTREE" else "other")
         sid = to_int(p.get("SPCS_CD"))
+        if sid is not None and p.get("SPSC_NM"):
+            raw_sci[sid][p["SPSC_NM"].strip()] += 1
         if sid not in species and sid is not None:
             names = [n.strip() for n in (p.get("COMMON_NM") or "").split(",") if n.strip()]
             species[sid] = {"id": sid, "master_id": None, "scientific": clean_scientific(p.get("SPSC_NM")),
@@ -356,6 +359,24 @@ def main():
         })
     log(f"trees: {len(trees):,} unique ({dupes:,} duplicates dropped)")
     del raw, seen_xy
+
+    # ---- species gaps: family / origin from Kew's WCVP, gated by an accuracy check ----------
+    from .enrich import MIN_FAMILY_AGREEMENT, MIN_ORIGIN_PRECISION, enrich_species, ensure_wcvp, score
+    raw_names = {sid: c.most_common(1)[0][0] for sid, c in raw_sci.items()}
+    w = ensure_wcvp()
+    acc = score(species, raw_names, w)
+    log(f"species accuracy check: family {acc['family_agreement']:.2%} of {acc['family_tested']}, "
+        f"origin {acc['origin_precision']:.2%} of {acc['origin_tested']}")
+    fill_family = acc["family_agreement"] >= MIN_FAMILY_AGREEMENT
+    fill_origin = acc["origin_precision"] >= MIN_ORIGIN_PRECISION
+    if not (fill_family and fill_origin):
+        log(f"WARNING: below accuracy bar, not filling: {'' if fill_family else 'family '}{'' if fill_origin else 'origin'}"
+            f" {acc['origin_wrong'][:5]}")
+    enrich_species(species, raw_names, w, fill_family=fill_family, fill_origin=fill_origin)
+    enrichment_report = {**acc, "filled_family": fill_family, "filled_origin": fill_origin,
+                         "family_from_wcvp": sum(1 for s in species.values() if s.get("family_src")),
+                         "origin_from_wcvp": sum(1 for s in species.values() if s.get("native_src"))}
+    del w
 
     pts = to_svy21(shapely.points([(t["lng"], t["lat"]) for t in trees]))
 
@@ -536,7 +557,7 @@ def main():
             p["slug"] = f"{p['slug']}-{seen[(p['kind'], p['slug'])]}"
 
     # ---- outputs ---------------------------------------------------------------
-    write_outputs(trees, species, places_with_trees, road_source, source_edit, t0)
+    write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report)
 
 
 def cell_of(lat, lng):
@@ -544,7 +565,7 @@ def cell_of(lat, lng):
     return int((lat - 1.1) * 500) * 1000 + int((lng - 103.5) * 500)
 
 
-def write_outputs(trees, species, places, road_source, source_edit, t0):
+def write_outputs(trees, species, places, road_source, source_edit, t0, enrichment=None):
     log("write: trees.geojsonl (tiles)")
     with open(OUT / "trees.geojsonl", "w") as fh:
         for t in trees:
@@ -569,8 +590,9 @@ def write_outputs(trees, species, places, road_source, source_edit, t0):
     w.raw("DROP TABLE IF EXISTS trees_new;\nDROP TABLE IF EXISTS species_new;\n"
           "DROP TABLE IF EXISTS places_new;\n" + staging, "staging")
     sp_cols = ["id", "master_id", "scientific", "common", "aliases", "family", "growth_form",
-               "native_distribution", "conservation_status", "native", "ffw_url", "tree_count"]
-    w.insert("species_new", sp_cols, ([s[c] for c in sp_cols] for s in species.values() if s["tree_count"]))
+               "native_distribution", "conservation_status", "native", "ffw_url", "tree_count",
+               "family_src", "native_src"]
+    w.insert("species_new", sp_cols, ([s.get(c) for c in sp_cols] for s in species.values() if s["tree_count"]))
     pl_cols = ["id", "kind", "slug", "name", "alt", "tree_count", "species_count", "heritage_count",
                "carbon_kg", "bbox", "top_species", "extra"]
     w.insert("places_new", pl_cols, ([p[c] for c in pl_cols] for p in places))
@@ -586,8 +608,10 @@ def write_outputs(trees, species, places, road_source, source_edit, t0):
         "category_counts": dict(Counter(t["category"] for t in trees)),
         "with_road": sum(1 for t in trees if t["road_id"]),
         "road_source": road_source,
+        "species_enrichment": {k: v for k, v in (enrichment or {}).items() if k != "family_differences"},
         "source_last_edit": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(source_edit / 1000)) if source_edit else None,
         "attribution": [SOURCES["arcgis"]["attribution"], SOURCES["datagovsg"]["attribution"],
+                        "Species family/origin gaps: WCVP, World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0)",
                         SOURCES["roads"]["primary"]["attribution"] if road_source == "osm"
                         else "Contains information from SLA National Map"],
     }

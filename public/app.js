@@ -419,6 +419,13 @@ function categoryStack(cats, total) {
     <div class="stack-legend">${present.map((c) => `<span><span class="dot" style="background:${catColor(c.key)}"></span>${c.label} ${fmt.format(byKey[c.key])}</span>`).join("")}</div>`;
 }
 
+function originStack(native, total) {
+  const parts = [["1", "Native", "var(--c-street)"], ["0", "Non-native", "var(--c-user)"], ["null", "Unknown", "var(--c-other)"]]
+    .map(([k, label, color]) => ({ label, color, n: native[k] || 0 })).filter((p) => p.n);
+  return `<div class="stack">${parts.map((p) => `<span style="width:${(p.n / total) * 100}%;background:${p.color}" title="${p.label}"></span>`).join("")}</div>
+    <div class="stack-legend">${parts.map((p) => `<span><span class="dot" style="background:${p.color}"></span>${p.label} ${fmt.format(p.n)}</span>`).join("")}</div>`;
+}
+
 // ---- place (road / park / area …)
 async function openPlace(kind, slug, bbox, fly = true) {
   openPanel(`<p class="muted">Loading…</p>`, { sheet: "half" });
@@ -443,7 +450,8 @@ async function highlightPlace(d, speciesId) {
 }
 function renderPlace(d) {
   const native = Object.fromEntries((d.native || []).map((r) => [String(r.k), r.n]));
-  const nativePct = d.tree_count ? Math.round(((native["1"] || 0) / d.tree_count) * 100) : 0;
+  const pct = (n) => (d.tree_count ? Math.round(((n || 0) / d.tree_count) * 100) : 0);
+  const nativePct = pct(native["1"]), unknownPct = pct(native["null"]);
   const extra = d.extra || {};
   const sub = [KIND_LABEL[d.kind], extra.planning_area, extra.region].filter(Boolean).join(" · ");
   const species = d.top_species.map((s) => ({ id: s.id, n: s.n, label: s.common || s.scientific || `Species ${s.id}`, sub: s.common ? s.scientific : "" }));
@@ -453,12 +461,13 @@ function renderPlace(d) {
     <div class="stats">
       ${statTile(fmt.format(d.tree_count), "trees")}
       ${statTile(fmt.format(d.species_count), "species")}
-      ${statTile(`${nativePct}%`, "trees of native species")}
+      ${statTile(`${nativePct}%`, `native species${unknownPct ? ` · ${unknownPct}% unknown` : ""}`)}
       ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
     </div>
     ${d.heritage_count ? `<div class="callout">🌟 ${d.heritage_count} heritage tree${d.heritage_count > 1 ? "s" : ""}</div>` : ""}
     ${safeUrl(extra.url) ? `<p><a href="${esc(safeUrl(extra.url))}" target="_blank" rel="noopener noreferrer">About this heritage road ↗</a></p>` : ""}
     <h3>Tree types</h3>${categoryStack(d.categories, d.tree_count)}
+    <h3>Origin</h3>${originStack(native, d.tree_count)}
     <h3>Top species <span class="muted" style="text-transform:none;letter-spacing:0">· tap to filter</span></h3>
     <div id="place-species">${barList(species, d.tree_count, { onclick: true, active: state.placeSpecies })}</div>
     <h3>Largest trees</h3>
@@ -508,7 +517,11 @@ async function openSpecies(id, fly = true) {
   if (fly) map.flyTo({ center: [103.8198, 1.3521], zoom: 11.3, padding: panelPadding() });
   const placeRows = (rows) => `<ul class="list">${rows.map((r) => `<li><button data-kind="${esc(r.kind)}" data-slug="${esc(r.slug)}">
     <span>${esc(r.name)}</span><span class="meta">${fmt.format(r.n)}</span></button></li>`).join("")}</ul>`;
-  const nativeLabel = s.native === 1 ? "Native to Singapore" : s.native === 0 ? "Non-native" : null;
+  const nativeLabel = s.native === 1 ? "Native to Singapore" : s.native === 0 ? "Non-native" : "Not recorded";
+  const sources = [
+    s.family_src ? "family" : null,
+    s.native_src ? "origin (native range entirely outside Asia)" : null,
+  ].filter(Boolean);
   openPanel(`
     <h2>${esc(s.common || s.scientific)}</h2>
     <p class="sub"><span class="sci">${esc(s.scientific)}</span>${s.family ? ` · ${esc(s.family)}` : ""}</p>
@@ -519,6 +532,7 @@ async function openSpecies(id, fly = true) {
       ${s.conservation_status ? `<dt>Status</dt><dd>${esc(s.conservation_status)}</dd>` : ""}
       ${s.aliases?.length ? `<dt>Also called</dt><dd>${esc(s.aliases.slice(0, 8).join(", "))}</dd>` : ""}
     </dl>
+    ${sources.length ? `<p class="note">NParks doesn't list this species' ${sources.join(" or ")}; shown from Kew's World Checklist of Vascular Plants.</p>` : ""}
     <div class="actions">
       ${safeUrl(s.ffw_url) ? `<a class="btn" href="${esc(safeUrl(s.ffw_url))}" target="_blank" rel="noopener noreferrer">Flora &amp; Fauna Web ↗</a>` : ""}
       <button class="btn" id="share">🔗 Share</button>
@@ -571,7 +585,7 @@ async function openTree(id, fly = true, keepContext = false) {
     <h2>${esc(s.common || s.scientific || "Tree")}</h2>
     <p class="sub"><span class="sci">${esc(s.scientific || "")}</span>${s.family ? ` · ${esc(s.family)}` : ""}</p>
     <p><span class="chip"><span class="dot" style="background:${catColor(cat.key)}"></span>${cat.label}</span>
-      ${s.native === 1 ? `<span class="chip">Native</span>` : s.native === 0 ? `<span class="chip">Non-native</span>` : ""}
+      ${s.native === 1 ? `<span class="chip">Native</span>` : s.native === 0 ? `<span class="chip" ${s.native_src ? 'title="From Kew\'s World Checklist: native range entirely outside Asia"' : ""}>Non-native${s.native_src ? " ·&nbsp;Kew" : ""}</span>` : ""}
       ${t.incorrect ? `<span class="chip" title="Reported as incorrect on Trees.sg">⚠ Reported</span>` : ""}</p>
     ${t.ht_no ? `<div class="callout">🌟 <b>Heritage Tree ${esc(t.ht_no)}</b><br>${esc(t.ht_desc || "")}
       ${safeUrl(t.ht_url) ? `<br><a href="${esc(safeUrl(t.ht_url))}" target="_blank" rel="noopener noreferrer">Read its story ↗</a>` : ""}</div>` : ""}
@@ -646,6 +660,7 @@ $("#about").addEventListener("click", () => {
         <li>Boundaries, parks and heritage data: <a href="https://data.gov.sg" target="_blank" rel="noopener noreferrer">data.gov.sg</a> (Singapore Open Data Licence)</li>
         <li>Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors (ODbL)</li>
         <li>Basemap and address search: <a href="https://www.onemap.gov.sg" target="_blank" rel="noopener noreferrer">OneMap</a> © Singapore Land Authority</li>
+        <li>Missing species families and origins: <a href="https://powo.science.kew.org/about-wcvp" target="_blank" rel="noopener noreferrer">World Checklist of Vascular Plants</a>, Royal Botanic Gardens, Kew (CC BY 4.0)</li>
       </ul>
       ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. It refreshes automatically.</p>` : ""}
       <h3>How it's worked out</h3>
@@ -653,6 +668,7 @@ $("#about").addEventListener("click", () => {
         <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
         <li><b>Carbon</b> is an estimate from girth and height (Chave et al. 2014), not a measurement.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
+        <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>
       <h3>Feedback</h3>
       <p>Ideas, bugs or questions? Message us on Telegram.</p>

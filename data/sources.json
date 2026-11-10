@@ -272,5 +272,11 @@
     "roadMaxDistanceM": 30,
     "pcnMaxDistanceM": 15,
     "heritageMatchM": 15
+  },
+  "speciesReference": {
+    "name": "World Checklist of Vascular Plants (WCVP)",
+    "url": "https://sftp.kew.org/pub/data-repositories/WCVP/wcvp.zip",
+    "attribution": "WCVP, World Checklist of Vascular Plants. Facilitated by the Royal Botanic Gardens, Kew (CC BY 4.0)",
+    "use": "Fills species family and (non-native only) origin where NParks has none; gated by an accuracy check against NParks labels"
   }
 }

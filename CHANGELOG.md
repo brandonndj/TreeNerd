@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-10: Species details
+
+### Added
+- Families for 1,085 species, and "non-native" origin for 370 species (127,341 trees, including the Rain Tree), where NParks had none. These come from Kew's World Checklist of Vascular Plants.
+- Place panels show an origin breakdown (native / non-native / unknown) instead of a single "% native".
+- An accuracy check on every data update: NParks' own answers are hidden and compared, and a field isn't filled if it falls below its bar. At launch, family matched 99.8% and origin 100%.
+
 ## 2026-11-09: Launch
 
 ### Added

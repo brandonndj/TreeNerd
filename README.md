@@ -55,10 +55,10 @@ Cloudflare Worker
 | `src/search.ts` | Fuzzy search over places and species |
 | `src/geocode.ts` | Address-search helpers (query clean-up, result parsing) |
 | `src/pages.ts` | Page titles, link previews, sitemap |
-| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs) |
+| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check) |
 | `data/sources.json` | Upstream sources used by the pipeline |
 | `schema.sql` | Database schema |
-| `tests/` | Pipeline, search and address-search tests |
+| `tests/` | Pipeline, species-enrichment, search and address-search tests |
 
 ## Methodology
 
@@ -66,6 +66,12 @@ Cloudflare Worker
 - **Areas** (subzones, planning areas, parks, constituencies, conservation areas) are assigned by point-in-polygon.
 - **Carbon is an estimate.** It uses a standard pantropical allometric model (Chave et al., 2014) on girth and height band, with 47% of biomass counted as carbon. Treat it as indicative.
 - **Heights are banded** (3 m bands) as published by the source.
+- **Species family and origin** come from NParks. Where NParks has none, they're filled from Kew's [World Checklist of Vascular Plants](https://powo.science.kew.org/about-wcvp):
+  - Names are matched to one accepted plant. Outdated names are followed to their current one, and same-name clashes are settled by the author name. A match that stays unclear is skipped.
+  - **Family** follows NParks' naming wherever NParks already lists the genus.
+  - **Origin** is only ever filled as *non-native*, and only when the plant's entire native range is outside Asia. Being native to the region doesn't make a plant native to Singapore, so "native" is never inferred; those species stay unknown.
+  - **Accuracy is checked on every update** by hiding NParks' own answers and comparing. In testing, family matched 99.8% (the rest were renamed families, such as Cordiaceae → Boraginaceae) and origin matched 100%. If a check falls below its bar, that field isn't filled.
+  - The app labels every value that came from Kew.
 - **Freshness**: the data is rebuilt weekly and whenever the source data changes. The app shows the date of the last update.
 
 ## Privacy
@@ -93,6 +99,7 @@ Ideas, bugs or questions: message us on [Telegram](https://t.me/treenerd?direct)
 - Boundaries, parks and heritage data: [data.gov.sg](https://data.gov.sg), under the [Singapore Open Data Licence](https://data.gov.sg/open-data-licence)
 - Roads © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), [ODbL](https://opendatacommons.org/licenses/odbl/). The derived tree-to-road assignments are available under the ODbL.
 - Basemap and address search: [OneMap](https://www.onemap.gov.sg) © Singapore Land Authority
+- Missing species families and origins: [WCVP](https://powo.science.kew.org/about-wcvp), World Checklist of Vascular Plants, facilitated by the Royal Botanic Gardens, Kew ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
 - Bundled libraries: MapLibre GL JS and PMTiles (BSD-3-Clause)
 
 TreeNerd is an independent project and isn't affiliated with or endorsed by NParks or any government agency.
