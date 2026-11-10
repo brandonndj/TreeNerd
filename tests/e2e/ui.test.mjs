@@ -165,6 +165,17 @@ test("a slow tree shows a loading card", async () => {
   await ctx.close();
 });
 
+test("a slow answer to an earlier tap doesn't overwrite a newer panel", async () => {
+  const { ctx, page, h2 } = await open("/?top=road:trees");
+  await panelTitle(page, "Roads: most trees");
+  await page.route("**/api/top?kind=tree", async (r) => { await new Promise((x) => setTimeout(x, 1500)); await r.continue(); });
+  await page.click('.chip-btn[data-kind="tree"]'); // slow
+  await page.click("#about");                      // opened after it, so it must stay
+  await page.waitForTimeout(2200);
+  assert.equal(await h2(), "About TreeNerd");
+  await ctx.close();
+});
+
 test("wide screens can't zoom out past the basemap", async () => {
   const { ctx, page } = await open("/", { viewport: { width: 2000, height: 995 } });
   await page.mouse.move(1000, 500);

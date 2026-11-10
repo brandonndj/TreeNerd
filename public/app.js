@@ -435,6 +435,7 @@ function openPanel(html, { sheet } = {}) {
   requestAnimationFrame(() => map.triggerRepaint()); // some GPUs leave a stale canvas under new overlays
 }
 function closePanel() {
+  navSeq++;
   panel.hidden = true; document.body.classList.remove("panel-open");
   document.documentElement.style.setProperty("--sheet-offset", "0px");
   state.place = state.species = state.tree = null;
@@ -546,17 +547,22 @@ function originStack(native, total) {
     <div class="stack-legend">${parts.map((p) => `<span><span class="dot" style="background:${p.color}"></span>${p.label} ${fmt.format(p.n)}</span>`).join("")}</div>`;
 }
 
+// Only the latest thing opened may draw the panel: a slow answer to an earlier tap is dropped.
+let navSeq = 0;
+
 // ---- place (road / park / area …)
 async function openPlace(kind, slug, bbox, fly = true) {
+  const seq = ++navSeq;
   openPanel(`<p class="muted">Loading…</p>`, { sheet: "half" });
   let d;
   try { d = await api(`/api/place/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`); }
-  catch (e) { return openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
+  catch (e) { return seq === navSeq && openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
+  if (seq !== navSeq) return;
   state.place = d; state.species = null; state.placeSpecies = null;
   setUrl({ p: `${kind}/${slug}` });
   if (fly) fitBbox(d.bbox || bbox, kind === "road" ? 18 : 17);
   await highlightPlace(d);
-  renderPlace(d);
+  if (seq === navSeq) renderPlace(d);
 }
 async function highlightPlace(d, speciesId) {
   let expr;
@@ -629,10 +635,12 @@ async function loadTreeList(d, offset) {
 
 // ---- species
 async function openSpecies(id, fly = true) {
+  const seq = ++navSeq;
   openPanel(`<p class="muted">Loading…</p>`, { sheet: "half" });
   let s;
   try { s = await api(`/api/species/${encodeURIComponent(id)}`); }
-  catch (e) { return openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
+  catch (e) { return seq === navSeq && openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
+  if (seq !== navSeq) return;
   state.species = s; state.place = null;
   setUrl({ s: id });
   setHighlight(["==", ["get", "s"], s.id]);
@@ -674,11 +682,13 @@ async function openSpecies(id, fly = true) {
 // ---- tree
 async function openTree(id, fly = true, keepContext = false) {
   let t;
+  const seq = ++navSeq;
   // on a slow connection, say so instead of leaving the tap looking ignored
-  const slow = setTimeout(() => openPanel(`<p class="muted" role="status">Loading tree…</p>`, { sheet: "half" }), 300);
+  const slow = setTimeout(() => seq === navSeq && openPanel(`<p class="muted" role="status">Loading tree…</p>`, { sheet: "half" }), 300);
   try { t = await api(`/api/tree/${encodeURIComponent(id)}`); }
-  catch (e) { toast(`Tree ${id}: ${e.message}`); return; }
+  catch (e) { if (seq === navSeq) toast(`Tree ${id}: ${e.message}`); return; }
   finally { clearTimeout(slow); }
+  if (seq !== navSeq) return;
   state.tree = t;
   const back = keepContext && (state.place || state.species);
   setUrl({ ...(state.place ? { p: `${state.place.kind}/${state.place.slug}` } : {}), ...(state.species ? { s: state.species.id } : {}), t: id });
@@ -744,9 +754,11 @@ map.on("contextmenu", (e) => nearby(e.lngLat.lat, e.lngLat.lng)); // right-click
 async function nearby(lat, lng, r = 150, label = null) {
   // Privacy: only a position rounded to ~10 m ever leaves the browser.
   lat = Math.round(lat * 1e4) / 1e4; lng = Math.round(lng * 1e4) / 1e4;
+  const seq = ++navSeq;
   let d;
   try { d = await api(`/api/near?lat=${lat}&lng=${lng}&r=${r}&limit=60`); }
-  catch (e) { return toast(e.message); }
+  catch (e) { return seq === navSeq && toast(e.message); }
+  if (seq !== navSeq) return;
   state.place = state.species = null;
   setUrl({ near: `${lat.toFixed(4)},${lng.toFixed(4)},${r}`, n: label?.title || null });
   const circle = Array.from({ length: 65 }, (_, i) => {
@@ -797,10 +809,12 @@ function wireChangeRows() {
   }));
 }
 async function openChanges() {
+  const seq = ++navSeq;
   openPanel(`<p class="muted" role="status">Loading…</p>`, { sheet: "half" });
   let d;
   try { d = await api("/api/changes"); }
-  catch (e) { return openPanel(`<h2>Recent changes</h2><p class="muted">${esc(e.message)}</p>`); }
+  catch (e) { return seq === navSeq && openPanel(`<h2>Recent changes</h2><p class="muted">${esc(e.message)}</p>`); }
+  if (seq !== navSeq) return;
   state.place = state.species = null;
   setHighlight(null); selectPoint(null);
   setUrl({ top: "changes" });
@@ -829,10 +843,12 @@ const TOP_BYS = [["trees", "Most trees"], ["species", "Most species"], ["carbon"
 async function openTop(kind = "road", by = "trees") {
   if (!TOP_KINDS.some(([k]) => k === kind)) kind = "road";
   if (!TOP_BYS.some(([b]) => b === by)) by = "trees";
+  const seq = ++navSeq;
   openPanel(`<p class="muted" role="status">Loading…</p>`, { sheet: "half" });
   let d;
   try { d = await api(`/api/top?kind=${kind}${kind === "tree" ? "" : `&by=${by}`}`); }
-  catch (e) { return openPanel(`<h2>Rankings</h2><p class="muted">${esc(e.message)}</p>`); }
+  catch (e) { return seq === navSeq && openPanel(`<h2>Rankings</h2><p class="muted">${esc(e.message)}</p>`); }
+  if (seq !== navSeq) return;
   state.place = state.species = null;
   setHighlight(null); selectPoint(null);
   setUrl({ top: kind === "tree" ? "tree" : `${kind}:${by}` });
@@ -861,6 +877,7 @@ async function openTop(kind = "road", by = "trees") {
 const TELEGRAM = "https://t.me/treenerd";
 $("#about").addEventListener("click", () => {
   const m = state.meta || {};
+  navSeq++;
   state.place = state.species = null;
   openPanel(`
     <h2>About TreeNerd</h2>
