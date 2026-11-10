@@ -624,8 +624,7 @@ async function openTree(id, fly = true, keepContext = false) {
     <p><span class="chip"><span class="dot" style="background:${catColor(cat.key)}"></span>${cat.label}</span>
       ${s.native === 1 ? `<span class="chip">Native</span>` : s.native === 0 ? `<span class="chip" ${s.native_src ? 'title="From Kew\'s World Checklist: native range entirely outside Asia"' : ""}>Non-native${s.native_src ? " ·&nbsp;Kew" : ""}</span>` : ""}
       ${t.incorrect ? `<span class="chip" title="Reported as incorrect on Trees.sg">⚠ Reported</span>` : ""}</p>
-    ${t.ht_no ? `<div class="callout">🌟 <b>Heritage Tree ${esc(t.ht_no)}</b><br>${esc(t.ht_desc || "")}
-      ${safeUrl(t.ht_url) ? `<br><a href="${esc(safeUrl(t.ht_url))}" target="_blank" rel="noopener noreferrer">Read its story ↗</a>` : ""}</div>` : ""}
+    ${t.ht_no ? `<div class="callout">🌟 <b>Heritage Tree ${esc(t.ht_no)}</b>${t.ht_desc ? `<br>${esc(t.ht_desc)}` : ""}${safeUrl(t.ht_url) ? `<br><a href="${esc(safeUrl(t.ht_url))}" target="_blank" rel="noopener noreferrer">Read its story ↗</a>` : ""}</div>` : ""}
     ${t.measure_flag ? `<div class="callout warn">⚠ <b>Possible recording error.</b> The recorded girth (${Number(t.girth_m).toFixed(1)} m) and height (${esc(t.height_band)} m) can't both be right: the trunk would be wider than the tree is plausibly tall. One of them is probably mis-recorded in the source data, so no carbon estimate is shown.</div>` : ""}
     <h3>Details</h3>
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
