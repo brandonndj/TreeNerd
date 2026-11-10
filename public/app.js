@@ -30,7 +30,9 @@ if (location.hostname.startsWith("dev.")) {
   const bar = document.createElement("div");
   bar.className = "dev-banner"; bar.setAttribute("role", "note");
   const live = document.createElement("a");
-  live.href = `https://treenerd.fyi/${location.search}${location.hash}`;
+  const liveUrl = () => `https://treenerd.fyi/${location.search}${location.hash}`;
+  live.href = liveUrl();
+  live.addEventListener("click", () => { live.href = liveUrl(); }); // the same view as now, not as first loaded
   live.textContent = "Open the live site";
   bar.append("DEV PREVIEW · not the live site · ", live);
   document.body.prepend(bar);
