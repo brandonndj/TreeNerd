@@ -22,8 +22,16 @@ async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } 
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => /parse the tile/i.test(m.text()) && errors.push(m.text()));
   page.on("response", (r) => /\/tiles\/\d+\//.test(r.url()) && tiles.push({ url: r.url(), status: r.status() }));
+  const trouble = []; // shown if the app fails to start, so a CI failure explains itself
+  page.on("console", (m) => m.type() === "error" && trouble.push(`console: ${m.text().slice(0, 200)}`));
+  page.on("requestfailed", (r) => !/onemap|cloudflareinsights/.test(r.url()) && trouble.push(`failed: ${r.url()} ${r.failure()?.errorText}`));
   await page.goto(origin + path, { waitUntil: "load" });
-  await page.waitForSelector("#legend-items label", { state: "attached" }); // the map has loaded and the app is wired
+  try {
+    await page.waitForSelector("#legend-items label", { state: "attached" }); // the map has loaded and the app is wired
+  } catch (e) {
+    const webgl = await page.evaluate(() => !!document.createElement("canvas").getContext("webgl2")).catch(() => "unknown");
+    throw new Error(`the app did not start on ${path} (WebGL2: ${webgl})\n${[...errors, ...trouble].slice(0, 12).join("\n")}`, { cause: e });
+  }
   return { ctx, page, errors, tiles, h2: () => page.locator("#panel-body h2").textContent(), param: (k) => new URL(page.url()).searchParams.get(k) };
 }
 const panelTitle = (page, text) => page.waitForFunction((t) => document.querySelector("#panel-body h2")?.textContent === t, text);

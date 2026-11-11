@@ -40,12 +40,14 @@ jobs:
   integration:
     # Runs the Worker locally on a small fixture site and tests the API and the app in a browser:
     # Chromium, and WebKit (Safari's engine, for iPhone and iPad).
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium, webkit]
+        include:
+          - { browser: chromium, os: ubuntu-latest }
+          - { browser: webkit, os: macos-latest } # WebKit needs a real GPU stack for the map (WebGL)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
