@@ -1,5 +1,7 @@
 # Changelog
 
+What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
+
 ## 2026-11-10: Accuracy, iPhone and iPad, reliability
 
 ### Accuracy
@@ -13,9 +15,13 @@
 - Tapping quickly no longer lets a slow answer replace what you opened after it.
 
 ### Reliability
+- Data updates are checked more thoroughly before the site switches to them, and can be undone in one step if something is wrong.
+
+### Internal
 - Tiles and search files switch together with the database, so a rollback restores a matching set. A `Roll back data` workflow does it in one step.
 - `/api/health` for uptime monitoring; a failed update opens an issue; a missed weekly update triggers a rebuild.
 - The three build requirements are written down in PRINCIPLES.md and enforced by tests, including a run in Safari's engine.
+- New changelog entries are posted to the Telegram channel when they reach `main`.
 
 ## 2026-11-10: Rankings, recent changes and better carbon estimates
 

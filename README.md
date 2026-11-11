@@ -74,6 +74,7 @@ Cloudflare Worker
 | `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed), `audit.py` (accuracy audit run before publishing) |
 | `data/sources.json` | Upstream sources used by the pipeline |
 | `schema.sql` | Database schema |
+| `tools/announce.py` | Posts new changelog entries to the Telegram channel |
 | `tests/` | Unit tests for the pipeline, search, address search and security headers |
 | `tests/e2e/` | Integration tests: the Worker's API and the app in a browser, on a small fixture site (`tests/fixtures/site`) |
 
@@ -136,6 +137,10 @@ npx playwright install chromium && npm run test:e2e       # API and browser test
 pip install --require-hashes -r pipeline/requirements.lock
 python -m unittest discover -s tests                      # pipeline tests
 ```
+
+## Updates
+
+New features and fixes are listed in the [changelog](CHANGELOG.md) and posted to the [Telegram channel](https://t.me/treenerd) when they go live.
 
 ## Feedback
 

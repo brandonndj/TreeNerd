@@ -21,4 +21,7 @@ Rules for this repository:
 - Push to the working branch first (it deploys to dev.treenerd.fyi). `main` deploys the live site:
   push there only when the owner asks.
 - After a pipeline, schema or tile change, regenerate the test fixture (`tests/e2e/make_fixture.py`).
+- Every change visitors can notice needs a CHANGELOG.md entry in plain language: it is posted to the
+  Telegram channel when it reaches `main`, word for word, so it must be accurate. Developer-only notes
+  go under a `### Internal` heading, which is never posted.
 - Keep the repository free of secrets and account-specific setup details.

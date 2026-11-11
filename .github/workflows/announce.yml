@@ -1,0 +1,50 @@
+name: Announce updates
+
+# When a push to main adds entries to CHANGELOG.md, post them to the Telegram channel.
+# Entries under "Internal" are never posted (see tools/announce.py).
+on:
+  push:
+    branches: [main]
+    paths: [CHANGELOG.md]
+  workflow_dispatch:
+    inputs:
+      since:
+        description: Compare the changelog with this commit
+        default: HEAD~1
+      send:
+        description: Post to the channel (off = preview in the run log only)
+        type: boolean
+        default: false
+
+concurrency:
+  group: announce
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Post new changelog entries
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          BEFORE: ${{ github.event.before || github.event.inputs.since }}
+          SEND: ${{ github.event_name == 'push' || github.event.inputs.send == 'true' }}
+        run: |
+          if ! git show "$BEFORE:CHANGELOG.md" > "$RUNNER_TEMP/old-changelog.md" 2>/dev/null; then
+            echo "The previous changelog ($BEFORE) isn't available: nothing announced."; exit 0
+          fi
+          if [ "$SEND" != "true" ]; then python3 tools/announce.py "$RUNNER_TEMP/old-changelog.md" CHANGELOG.md; exit 0; fi
+          # nothing to say? stop before waiting
+          python3 tools/announce.py "$RUNNER_TEMP/old-changelog.md" CHANGELOG.md | grep -q "nothing to announce" && exit 0
+          sleep 120 # the site deploys from the same push; announce once it is live
+          python3 tools/announce.py "$RUNNER_TEMP/old-changelog.md" CHANGELOG.md --send
