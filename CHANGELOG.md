@@ -25,6 +25,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - `/api/health` for uptime monitoring; a failed update opens an issue; a missed weekly update triggers a rebuild.
 - The three build requirements are written down in PRINCIPLES.md and enforced by tests, including a run in Safari's engine.
 - New changelog entries are posted to the Telegram channel when they reach `main`.
+- "Always optimise cost" is now a standing rule in PRINCIPLES.md and CLAUDE.md.
 - Each data update writes about 6.3 million database rows instead of 8.9 million (partial indexes, no girth index), and updates run weekly only, to stay inside the database's included usage.
 
 ## 2026-11-10: Rankings, recent changes and better carbon estimates

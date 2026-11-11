@@ -95,6 +95,24 @@ new view to `IOS_VIEWS` in the tests, and give every new control a 44-point targ
 previous build (add, don't rename; tolerate missing fields), and say in the change what happens if
 it has to be rolled back.
 
+## Cost: always optimise
+
+Alongside the three requirements, every change is made the cheapest way that still meets them.
+Cost never overrides accuracy, the iPhone and iPad experience or reliability; within them, pick the
+cheaper design, and say what a change will cost before making it.
+
+- **Know what is billed.** The database bills every row written, index entries included, and every
+  row read. Storage bills per operation. Requests to the Worker are billed too.
+- **Data updates are the main cost.** Each one rewrites the whole database: about 6.3 million rows
+  written, with 50 million a month included. Updates run weekly, which uses about 27 million.
+- **Don't add what multiplies writes:** extra data updates, automatic rebuild triggers, or full
+  indexes on the tree table (each costs up to 890,000 writes per update). Prefer partial indexes
+  and small precomputed tables.
+- **Cache before computing.** Anything that is the same for every visitor is cached at the edge,
+  keyed to the data build, so repeat requests cost nothing.
+- **State the cost of a change** in its description when it touches the schema, the data workflow,
+  scheduled jobs, or adds a request per page view.
+
 ## Before merging to `main`
 
 - [ ] `npm test`, `python -m unittest discover -s tests` and `npm run test:e2e` pass, unmodified.
@@ -103,3 +121,4 @@ it has to be rolled back.
 - [ ] Any new UI was checked at iPhone and iPad sizes and added to the iOS tests.
 - [ ] The change works with the data that is live today.
 - [ ] The dev site was checked.
+- [ ] The change's running cost is known and is the cheapest option that meets the three requirements.

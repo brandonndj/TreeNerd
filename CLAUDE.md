@@ -24,6 +24,8 @@ Rules for this repository:
 - Every change visitors can notice needs a CHANGELOG.md entry in plain language: it is posted to the
   Telegram channel when it reaches `main`, word for word, so it must be accurate. Developer-only notes
   go under a `### Internal` heading, which is never posted.
+- Always optimise cost (see "Cost" in PRINCIPLES.md): choose the cheapest design that still meets
+  the three requirements, and tell the owner what a change will cost to run before making it.
 - Cost: a data update rewrites the whole database, and the database bills every row written,
   index entries included (about 6.3 million per update; 50 million a month are included). Updates run
   weekly. Don't start extra data updates, add full indexes on `trees`, or add rebuild triggers
