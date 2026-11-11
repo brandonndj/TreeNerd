@@ -156,12 +156,15 @@ test("what the page says matches the data", async () => {
   const meta = await (await fetch(`${B}/api/meta`)).json();
   assert.match(await page.textContent("#total"), new RegExp(fmt.format(meta.tree_count)));
   assert.doesNotMatch(await page.textContent("#updated"), /overdue/);
-  // a palm gets no carbon figure, and the card says why
-  await page.goto(`${B}/?t=13197918`);
-  await page.waitForFunction(() => /Not estimated/.test(document.querySelector("#panel-body")?.textContent || ""));
-  assert.match(await page.textContent("#panel-body"), /Not estimated: the model doesn't cover palms/);
   assert.deepEqual(errors, []);
   await ctx.close();
+  // A palm gets no carbon figure, and the card says why. (A separate page: navigating away while the
+  // map is loading cancels its downloads, which WebKit reports as page errors.)
+  const palm = await open("/?t=13197918");
+  await palm.page.waitForFunction(() => /Not estimated/.test(document.querySelector("#panel-body")?.textContent || ""));
+  assert.match(await palm.page.textContent("#panel-body"), /Not estimated: the model doesn't cover palms/);
+  assert.deepEqual(palm.errors, []);
+  await palm.ctx.close();
 });
 
 test("old data is labelled as overdue", async () => {
@@ -174,7 +177,7 @@ test("old data is labelled as overdue", async () => {
 });
 
 test("recent changes on a place and across Singapore", async () => {
-  const { ctx, page, errors, h2, param } = await open("/?p=road/orchard-road");
+  const { ctx, page, errors, h2 } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");
   await page.click("details.changes summary");
   assert.equal(await page.locator("details.changes li").count(), 6);
@@ -182,12 +185,14 @@ test("recent changes on a place and across Singapore", async () => {
   assert.equal(await h2(), "Orchard Road");
   await page.click("details.changes button[data-change=added]");
   await page.waitForFunction(() => new URL(location.href).searchParams.has("t"));
-  await page.goto(`${B}/?top=changes`);
-  await panelTitle(page, "Recent changes");
-  assert.equal(await page.locator("#panel-body button[data-change]").count(), 6);
-  assert.equal(param("top"), "changes");
   assert.deepEqual(errors, []);
   await ctx.close();
+  const all = await open("/?top=changes"); // a separate page, for the reason given above
+  await panelTitle(all.page, "Recent changes");
+  assert.equal(await all.page.locator("#panel-body button[data-change]").count(), 6);
+  assert.equal(all.param("top"), "changes");
+  assert.deepEqual(all.errors, []);
+  await all.ctx.close();
 });
 
 test("a station opens the trees within 250 m", async () => {
