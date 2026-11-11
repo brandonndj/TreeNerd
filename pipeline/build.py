@@ -663,6 +663,9 @@ def main():
                   stations=stations, density_report=density_report)
 
 
+TOP_TREES = 25  # how many of the widest trunks the ranking lists
+
+
 TILE_KEYS = {"road": "r", "park": "p", "planning_area": "a", "subzone": "u", "constituency": "e"}
 
 
@@ -695,7 +698,7 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     schema = (Path(__file__).resolve().parent.parent / "schema.sql").read_text()
     tables = re.sub(r"CREATE (UNIQUE )?INDEX[^;]+;\s*", "", schema)
     drop = "".join(f"DROP TABLE IF EXISTS {t};\n" for t in
-                   ("trees_new", "species_new", "places_new", "trees", "species", "places", "changes"))
+                   ("trees_new", "species_new", "places_new", "trees", "species", "places", "changes", "top_trees"))
     w.raw(drop + tables + "DELETE FROM meta WHERE key='build';\n", "tables")
     sp_cols = ["id", "master_id", "scientific", "common", "aliases", "family", "growth_form",
                "native_distribution", "conservation_status", "native", "ffw_url", "tree_count",
@@ -710,6 +713,10 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
                "land_use", "ht_no", "ht_url", "ht_desc", "carbon_kg", "carbon_nparks", "last_edited", "measure_flag",
                "carbon_skip"]
     w.insert("trees", tr_cols, ([t[c] for c in tr_cols] for t in trees))
+    # the widest recorded trunks, stored so the ranking needs no index on girth (see schema.sql)
+    widest = sorted((t for t in trees if t["girth_m"] and not t["measure_flag"]),
+                    key=lambda t: (-t["girth_m"], t["id"]))[:TOP_TREES]
+    w.insert("top_trees", ["rank", "tree_id"], ([i + 1, t["id"]] for i, t in enumerate(widest)))
     built = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     # trees added to / gone from the records since the previous build (see pipeline/changes.py)

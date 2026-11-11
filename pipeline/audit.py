@@ -88,6 +88,12 @@ def consistency(db: sqlite3.Connection, meta: dict, search: list[dict]) -> list[
         check(all(real.get(sid) == c for sid, c in listed), f"{r['kind']}/{r['slug']}: top species counts are wrong")
         check(not listed or listed[0][1] == max(real.values()), f"{r['kind']}/{r['slug']}: top species isn't the commonest")
 
+    # the "widest trunks" ranking must be exactly the widest unflagged trunks in the tree table
+    listed = [r[0] for r in db.execute("SELECT tree_id FROM top_trees ORDER BY rank")]
+    real = [r[0] for r in db.execute("""SELECT id FROM trees WHERE girth_m IS NOT NULL AND coalesce(measure_flag, 0)=0
+                                         ORDER BY girth_m DESC, id LIMIT ?""", (len(listed),))]
+    check(listed == real and len(listed) == min(25, n), "the widest-trunks ranking doesn't match the tree table")
+
     # the search index must describe the same places and species as the database
     index = {(e["k"], e["s"]): e["c"] for e in search if e["k"] != "mrt"}
     table = {(r[0], r[1]): r[2] for r in db.execute("SELECT kind, slug, tree_count FROM places")}

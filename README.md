@@ -42,7 +42,7 @@ Add `&c=1,2` to show only some tree types (1 street, 2 park, 3 Botanic Gardens, 
 ## How it works
 
 ```
-Data pipeline (GitHub Actions: weekly, and whenever the source data changes)
+Data pipeline (GitHub Actions: weekly)
   fetch  → public tree inventory, open government geodata, OpenStreetMap roads, reference tables
   build  → clean, de-duplicate, spatial joins, carbon estimates, comparison with the previous build
   audit  → re-count every figure, compare a sample of trees with the live source; stop on any failure
@@ -120,7 +120,7 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
   - If more than 5% of trees appear or disappear in one update, it's treated as a data problem and nothing is logged.
   - The log covers about six months.
 - **Stations**: an MRT or LRT station is the centre of its exits; its tree count is the trees within 250 m.
-- **Freshness**: the data is rebuilt weekly and whenever the source data changes. The app shows the date of the last update.
+- **Freshness**: the data is rebuilt once a week. The app shows the date of the last update, and says so if an update is overdue.
 
 ## Privacy
 

@@ -73,16 +73,25 @@ CREATE TABLE IF NOT EXISTS trees (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_places_kind_slug ON places(kind, slug);
-CREATE INDEX IF NOT EXISTS idx_trees_road ON trees(road_id);
-CREATE INDEX IF NOT EXISTS idx_trees_park ON trees(park_id);
+-- Cost note: D1 bills every row written, and an index entry counts as a row. The whole database is
+-- rewritten on each data update, so each index on trees costs up to ~890,000 writes per update.
+-- Columns that are empty for most trees use partial indexes (only the rows that have a value), and
+-- there is no index on girth: the few widest trunks are stored in top_trees instead.
+CREATE INDEX IF NOT EXISTS idx_trees_road ON trees(road_id) WHERE road_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_trees_park ON trees(park_id) WHERE park_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_subzone ON trees(subzone_id);
 CREATE INDEX IF NOT EXISTS idx_trees_pa ON trees(pa_id);
-CREATE INDEX IF NOT EXISTS idx_trees_pcn ON trees(pcn_id);
+CREATE INDEX IF NOT EXISTS idx_trees_pcn ON trees(pcn_id) WHERE pcn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_ed ON trees(ed_id);
-CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id);
+CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id) WHERE hr_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_species ON trees(species_id);
 CREATE INDEX IF NOT EXISTS idx_trees_cell ON trees(cell);
-CREATE INDEX IF NOT EXISTS idx_trees_girth ON trees(girth_m);
+
+-- The trees with the widest recorded trunks (the "widest trunks" ranking), widest first.
+CREATE TABLE IF NOT EXISTS top_trees (
+  rank INTEGER PRIMARY KEY,
+  tree_id INTEGER NOT NULL
+);
 
 -- Trees added to / no longer in NParks' records, per build that noticed (rolling ~6 months).
 CREATE TABLE IF NOT EXISTS changes (

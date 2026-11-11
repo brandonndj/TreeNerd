@@ -4,6 +4,7 @@ DROP TABLE IF EXISTS trees;
 DROP TABLE IF EXISTS species;
 DROP TABLE IF EXISTS places;
 DROP TABLE IF EXISTS changes;
+DROP TABLE IF EXISTS top_trees;
 DROP TABLE IF EXISTS meta;
 
 
@@ -80,16 +81,25 @@ CREATE TABLE IF NOT EXISTS trees (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_places_kind_slug ON places(kind, slug);
-CREATE INDEX IF NOT EXISTS idx_trees_road ON trees(road_id);
-CREATE INDEX IF NOT EXISTS idx_trees_park ON trees(park_id);
+
+
+
+
+CREATE INDEX IF NOT EXISTS idx_trees_road ON trees(road_id) WHERE road_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_trees_park ON trees(park_id) WHERE park_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_subzone ON trees(subzone_id);
 CREATE INDEX IF NOT EXISTS idx_trees_pa ON trees(pa_id);
-CREATE INDEX IF NOT EXISTS idx_trees_pcn ON trees(pcn_id);
+CREATE INDEX IF NOT EXISTS idx_trees_pcn ON trees(pcn_id) WHERE pcn_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_ed ON trees(ed_id);
-CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id);
+CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id) WHERE hr_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_species ON trees(species_id);
 CREATE INDEX IF NOT EXISTS idx_trees_cell ON trees(cell);
-CREATE INDEX IF NOT EXISTS idx_trees_girth ON trees(girth_m);
+
+
+CREATE TABLE IF NOT EXISTS top_trees (
+  rank INTEGER PRIMARY KEY,
+  tree_id INTEGER NOT NULL
+);
 
 
 CREATE TABLE IF NOT EXISTS changes (
@@ -1482,4 +1492,29 @@ INSERT INTO changes VALUES (10686516,'added','2026-01-05','2025-12-29',103.84365
 INSERT INTO changes VALUES (990000001,'removed','2026-01-05','2025-12-29',103.8436995,1.2999479,'Rain Tree','Samanea saman',3.5,1,NULL,5533,5830,NULL);
 INSERT INTO changes VALUES (10687000,'added','2026-01-05','2025-12-29',103.8433092,1.3000139,'Rain Tree','Samanea saman',3.6,1,NULL,5533,5830,6314);
 INSERT INTO changes VALUES (990000002,'removed','2026-01-05','2025-12-29',103.84334919999999,1.3000139,'Rain Tree','Samanea saman',3.6,1,NULL,5533,5830,NULL);
+INSERT INTO top_trees VALUES (1,12975949);
+INSERT INTO top_trees VALUES (2,12975973);
+INSERT INTO top_trees VALUES (3,12561254);
+INSERT INTO top_trees VALUES (4,10687021);
+INSERT INTO top_trees VALUES (5,10686996);
+INSERT INTO top_trees VALUES (6,10015595);
+INSERT INTO top_trees VALUES (7,11394004);
+INSERT INTO top_trees VALUES (8,12561284);
+INSERT INTO top_trees VALUES (9,12561332);
+INSERT INTO top_trees VALUES (10,10686472);
+INSERT INTO top_trees VALUES (11,10686455);
+INSERT INTO top_trees VALUES (12,10016196);
+INSERT INTO top_trees VALUES (13,12561324);
+INSERT INTO top_trees VALUES (14,12561326);
+INSERT INTO top_trees VALUES (15,12561327);
+INSERT INTO top_trees VALUES (16,12561333);
+INSERT INTO top_trees VALUES (17,12561337);
+INSERT INTO top_trees VALUES (18,10016152);
+INSERT INTO top_trees VALUES (19,10687000);
+INSERT INTO top_trees VALUES (20,12561236);
+INSERT INTO top_trees VALUES (21,12561334);
+INSERT INTO top_trees VALUES (22,10016137);
+INSERT INTO top_trees VALUES (23,10686516);
+INSERT INTO top_trees VALUES (24,12441098);
+INSERT INTO top_trees VALUES (25,12561229);
 INSERT INTO meta VALUES ('build', '{"built_at":"2026-01-05T00:00:00Z","tree_count":1246,"species_count":87,"place_counts":{"road":4000,"subzone":329,"planning_area":55,"park":430,"constituency":33,"heritage_road":4,"pcn":7},"category_counts":{"street":1007,"park":215,"user":24},"with_road":738596,"measurement_flags":20,"road_source":"osm","wood_density":{"default":0.62,"trees_by_species":711084,"trees_by_genus":134781,"trees_by_default":43644},"changes":{"seen":"2026-01-05","since":"2025-12-29","added":3,"removed":3},"stations":188,"tile_keys":{"road":"r","park":"p","planning_area":"a","subzone":"u","constituency":"e"},"species_enrichment":{"family_tested":1629,"family_agreement":0.9975445058317987,"origin_tested":164,"origin_precision":1.0,"origin_left_blank":843,"origin_wrong":[],"filled_family":true,"filled_origin":true,"family_from_wcvp":1085,"origin_from_wcvp":423},"source_last_edit":"2026-01-04T00:00:00Z","attribution":["Trees.sg \u00a9 National Parks Board","Contains information from data.gov.sg accessed under the Singapore Open Data Licence","Species family/origin gaps: WCVP, World Checklist of Vascular Plants, Royal Botanic Gardens, Kew (CC BY 4.0)","Wood density: Global Wood Density Database v.2, Fischer et al. 2026 (CC BY 4.0)","\u00a9 OpenStreetMap contributors (ODbL)"]}');

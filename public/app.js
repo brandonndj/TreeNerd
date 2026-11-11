@@ -922,7 +922,7 @@ $("#about").addEventListener("click", () => {
         <li>Wood density: <a href="https://doi.org/10.5281/zenodo.16919509" target="_blank" rel="noopener noreferrer">Global Wood Density Database v.2</a>, Fischer et al. 2026 (CC BY 4.0)</li>
         <li>MRT and LRT stations: Land Transport Authority, via data.gov.sg</li>
       </ul>
-      ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. ${state.stale ? "An update is overdue, so recent changes by NParks aren't shown yet." : "It refreshes automatically."}</p>` : ""}
+      ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. ${state.stale ? "An update is overdue, so recent changes by NParks aren't shown yet." : "It refreshes every week."}</p>` : ""}
       <h3>How it's worked out</h3>
       <ul>
         <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>

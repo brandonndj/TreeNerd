@@ -4,7 +4,7 @@
  *  - /data/*  -> R2 objects (CSV export, tile archive, search/species/meta/changes JSON)
  *  - /tiles/* -> vector tiles read from the PMTiles archive in R2 (see tiles.ts)
  *  - /api/*   -> D1 queries + in-memory search index, rate-limited and edge-cached per data build
- *  - cron     -> checks the upstream source for new data and requests a rebuild
+ *  - cron     -> requests a rebuild only if the weekly data update was missed
  */
 import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
@@ -394,11 +394,16 @@ const TOP_BY: Record<string, string> = { trees: "tree_count", species: "species_
 async function apiTop(url: URL, env: Env) {
   const kind = url.searchParams.get("kind") ?? "road";
   if (kind === "tree") {
+    const cols = `t.id, t.lng, t.lat, t.girth_m, t.height_band, t.ht_no, s.common, s.scientific, p.name place`;
+    const joins = `LEFT JOIN species s ON s.id=t.species_id LEFT JOIN places p ON p.id=coalesce(t.park_id, t.road_id)`;
+    // The build stores the widest trunks in top_trees. Builds made before that have no such table:
+    // fall back to scanning the tree table.
     const { results } = await env.DB.prepare(
-      `SELECT t.id, t.lng, t.lat, t.girth_m, t.height_band, t.ht_no, s.common, s.scientific, p.name place
-         FROM trees t LEFT JOIN species s ON s.id=t.species_id LEFT JOIN places p ON p.id=coalesce(t.park_id, t.road_id)
-        WHERE t.girth_m IS NOT NULL AND coalesce(t.measure_flag, 0)=0 ORDER BY t.girth_m DESC LIMIT 25`,
-    ).all<Row>();
+      `SELECT ${cols} FROM top_trees w JOIN trees t ON t.id=w.tree_id ${joins} ORDER BY w.rank`,
+    ).all<Row>().catch(() => env.DB.prepare(
+      `SELECT ${cols} FROM trees t ${joins}
+        WHERE t.girth_m IS NOT NULL AND coalesce(t.measure_flag, 0)=0 ORDER BY t.girth_m DESC, t.id LIMIT 25`,
+    ).all<Row>());
     return json({ kind, by: "girth", trees: results }, 200, 21600);
   }
   const by = url.searchParams.get("by") ?? "trees";
@@ -547,13 +552,15 @@ async function checkForNewData(env: Env) {
   const last = await env.DB.prepare("SELECT value FROM meta WHERE key='last_dispatch'").first<{ value: string }>()
     .catch(() => null);
   const sinceDispatch = Date.now() - Number(last?.value ?? 0);
-  // Rebuild when the source has changed, or when the weekly update has been missed (it runs every
-  // 7 days, so a build older than 8 means a run failed or never started).
+  // Data is rebuilt once a week by the data workflow's own schedule. This check only steps in when
+  // that was missed: a build older than 8 days means a run failed or never started.
+  // It does NOT rebuild whenever the source changes. The source changes almost daily, and every
+  // rebuild rewrites the whole database, which is billed per row written (see schema.sql).
   const builtAt = meta?.built_at ? Date.parse(String(meta.built_at)) : 0;
   const overdue = Date.now() - builtAt > 8 * 86400_000;
   const changed = !!lastEdit && lastEdit > built + 60_000;
   if (overdue) console.error(`data is ${Math.round((Date.now() - builtAt) / 86400_000)} days old: the weekly update was missed`);
-  if (!(changed || overdue) || sinceDispatch < 20 * 3600_000) return;
+  if (!overdue || !changed || sinceDispatch < 20 * 3600_000) return;
   if (!env.GITHUB_TOKEN) return console.warn("a rebuild is needed; automatic rebuild is not configured");
   const gh = await fetch(
     `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW}/dispatches`,
@@ -563,7 +570,7 @@ async function checkForNewData(env: Env) {
         authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json",
         "user-agent": "TreeNerd (+https://treenerd.fyi)", "content-type": "application/json",
       },
-      body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { reason: changed ? "upstream data changed" : "weekly update missed" } }),
+      body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { reason: "weekly update missed" } }),
     },
   );
   console.log("rebuild requested:", gh.status);

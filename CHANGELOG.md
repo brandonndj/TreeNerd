@@ -14,6 +14,9 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - On iPads and landscape iPhones, the top buttons no longer sit on the legend, the legend starts closed, and the side panel is narrower.
 - Tapping quickly no longer lets a slow answer replace what you opened after it.
 
+### Changed
+- Tree data now updates once a week. It used to update whenever NParks' records changed as well, which was almost daily.
+
 ### Reliability
 - Data updates are checked more thoroughly before the site switches to them, and can be undone in one step if something is wrong.
 
@@ -22,6 +25,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - `/api/health` for uptime monitoring; a failed update opens an issue; a missed weekly update triggers a rebuild.
 - The three build requirements are written down in PRINCIPLES.md and enforced by tests, including a run in Safari's engine.
 - New changelog entries are posted to the Telegram channel when they reach `main`.
+- Each data update writes about 6.3 million database rows instead of 8.9 million (partial indexes, no girth index), and updates run weekly only, to stay inside the database's included usage.
 
 ## 2026-11-10: Rankings, recent changes and better carbon estimates
 

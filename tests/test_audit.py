@@ -28,6 +28,8 @@ def make_db(trees=None, places=None, species=None):
         db.execute("""INSERT INTO trees (id, lng, lat, cell, species_id, girth_m, height_band, category, carbon_kg, carbon_skip,
                                          road_id, pa_id, subzone_id, measure_flag) VALUES (?,?,?,0,?,?,?,?,?,?,10,20,30,0)""",
                    (tid, lng, lat, sid, girth, hb, cat, carbon, skip))
+    widest = db.execute("SELECT id FROM trees WHERE girth_m IS NOT NULL ORDER BY girth_m DESC, id LIMIT 25").fetchall()
+    db.executemany("INSERT INTO top_trees VALUES (?, ?)", [(i + 1, r[0]) for i, r in enumerate(widest)])
     return db
 
 
@@ -56,6 +58,11 @@ class ConsistencyTests(unittest.TestCase):
         problems = "\n".join(audit.consistency(make_db(places=places), {**META, "tree_count": 5}, SEARCH))
         for expected in ("summary says 5 trees", "shows 4 species, has 1", "carbon 999.0", "top species counts are wrong"):
             self.assertIn(expected, problems)
+
+    def test_a_wrong_widest_trunks_ranking_is_caught(self):
+        db = make_db()
+        db.execute("UPDATE top_trees SET tree_id=100 WHERE rank=1")  # the thinner tree listed first
+        self.assertTrue(any("widest-trunks ranking" in p for p in audit.consistency(db, META, SEARCH)))
 
     def test_a_stale_search_index_is_caught(self):
         stale = [dict(e, c=1) if e["s"] == "orchard-road" else e for e in SEARCH]
