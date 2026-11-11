@@ -10,6 +10,10 @@ const { devices } = playwright;
 
 const B = process.env.E2E_BASE || "http://127.0.0.1:8799";
 const PORT = new URL(B).port;
+// The page's security policy upgrades every request to HTTPS. Chromium exempts local addresses;
+// WebKit does not, so against the plain-HTTP local test server its scripts would fail to load.
+// For WebKit only, that one directive is removed from the test server's pages. (The live site is HTTPS.)
+const PLAIN_HTTP_FIX = (process.env.E2E_BROWSER || "chromium") === "webkit" || process.env.E2E_PLAIN_HTTP_FIX === "1";
 let browser;
 before(async () => { browser = await engine.launch(); });
 after(() => browser?.close());
@@ -17,6 +21,20 @@ after(() => browser?.close());
 async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } }, origin = B) {
   const ctx = await browser.newContext(ctxOptions);
   await ctx.route(/onemap\.gov\.sg|cloudflareinsights/, (r) => r.abort());
+  if (PLAIN_HTTP_FIX) {
+    await ctx.route(() => true, async (route) => {
+      if (route.request().resourceType() !== "document") return route.fallback();
+      // fetched by the test runner, which can't resolve dev.localhost: ask 127.0.0.1 with that Host
+      const u = new URL(route.request().url());
+      const res = u.hostname.endsWith(".localhost")
+        ? await route.fetch({ url: u.href.replace(u.hostname, "127.0.0.1"), headers: { ...route.request().headers(), host: u.host } })
+        : await route.fetch();
+      const headers = { ...res.headers() };
+      const csp = headers["content-security-policy"];
+      if (csp) headers["content-security-policy"] = csp.replace(/;?\s*upgrade-insecure-requests/, "");
+      await route.fulfill({ response: res, headers });
+    });
+  }
   const page = await ctx.newPage();
   const errors = [], tiles = [];
   page.on("pageerror", (e) => errors.push(e.message));
