@@ -18,9 +18,17 @@ let browser;
 before(async () => { browser = await engine.launch(); });
 after(() => browser?.close());
 
-async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } }, origin = B) {
+// The basemap (an outside service) is answered with a blank tile, so nothing depends on it and no
+// browser logs a failed request for it.
+const BLANK_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const stubOutside = (ctx) => ctx.route(/onemap\.gov\.sg|cloudflareinsights/, (r) => /\.png(\?|$)/.test(r.request().url())
+  ? r.fulfill({ status: 200, contentType: "image/png", headers: { "access-control-allow-origin": "*" }, body: BLANK_PNG })
+  : r.fulfill({ status: 204, body: "" }));
+
+/** Open a page of the app. `setup(ctx)` can add routes before the page loads. */
+async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } }, origin = B, setup = null) {
   const ctx = await browser.newContext(ctxOptions);
-  await ctx.route(/onemap\.gov\.sg|cloudflareinsights/, (r) => r.abort());
+  await stubOutside(ctx);
   if (PLAIN_HTTP_FIX) {
     await ctx.route(() => true, async (route) => {
       if (route.request().resourceType() !== "document") return route.fallback();
@@ -35,6 +43,7 @@ async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } 
       await route.fulfill({ response: res, headers });
     });
   }
+  if (setup) await setup(ctx);
   const page = await ctx.newPage();
   const errors = [], tiles = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -42,7 +51,7 @@ async function open(path, ctxOptions = { viewport: { width: 1280, height: 800 } 
   page.on("response", (r) => /\/tiles\/\d+\//.test(r.url()) && tiles.push({ url: r.url(), status: r.status() }));
   const trouble = []; // shown if the app fails to start, so a CI failure explains itself
   page.on("console", (m) => m.type() === "error" && trouble.push(`console: ${m.text().slice(0, 200)}`));
-  page.on("requestfailed", (r) => !/onemap|cloudflareinsights/.test(r.url()) && trouble.push(`failed: ${r.url()} ${r.failure()?.errorText}`));
+  page.on("requestfailed", (r) => trouble.push(`failed: ${r.url()} ${r.failure()?.errorText}`));
   await page.goto(origin + path, { waitUntil: "load" });
   try {
     await page.waitForSelector("#legend-items label", { state: "attached" }); // the map has loaded and the app is wired
@@ -156,14 +165,10 @@ test("what the page says matches the data", async () => {
 });
 
 test("old data is labelled as overdue", async () => {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  await ctx.route(/onemap\.gov\.sg|cloudflareinsights/, (r) => r.abort());
-  await ctx.route("**/api/meta", async (r) => {
+  const { ctx, page } = await open("/", undefined, B, (c) => c.route("**/api/meta", async (r) => {
     const res = await r.fetch();
     await r.fulfill({ response: res, json: { ...(await res.json()), built_at: "2026-01-05T00:00:00Z" } });
-  });
-  const page = await ctx.newPage();
-  await page.goto(B + "/");
+  }));
   await page.waitForFunction(() => /overdue/.test(document.querySelector("#updated")?.textContent || ""));
   await ctx.close();
 });
