@@ -75,6 +75,13 @@ a { color: var(--accent); }
   border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: auto;
   overscroll-behavior: contain; padding: 18px 18px 24px; }
 .panel-close { position: absolute; top: 6px; right: 6px; }
+/* Close buttons: a drawn X in a filled circle, big enough to see and hit with a thumb. */
+.panel-close, #clear { display: grid; place-items: center; padding: 0; color: var(--text); }
+.panel-close::before, #clear::before { content: ""; grid-area: 1 / 1; width: 32px; height: 32px; border-radius: 50%;
+  background: var(--surface-2); border: 1px solid var(--border); }
+.panel-close svg, #clear svg { grid-area: 1 / 1; position: relative; }
+.panel-close:hover, #clear:hover { background: transparent; }
+.panel-close:hover::before, #clear:hover::before { background: var(--border); }
 .sheet-handle { display: none; }
 .panel h2 { margin: 2px 40px 2px 0; font-size: 22px; line-height: 1.2; }
 .panel h3 { margin: 22px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
@@ -233,7 +240,8 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
     background: var(--surface); touch-action: none; cursor: grab; }
   .sheet-handle::after { content: ""; position: absolute; left: 50%; top: 10px; width: 40px; height: 5px;
     margin-left: -20px; border-radius: 3px; background: var(--border); }
-  .panel-close { top: 22px; z-index: 3; }
+  .panel-close { top: 18px; right: 8px; z-index: 3; }
+  .panel-close::before { width: 36px; height: 36px; }
   .btn { min-height: var(--tap); }
   .toast { bottom: calc(var(--sheet-offset, 0px) + 16px + var(--safe-b)); }
   .maplibregl-ctrl-group button { width: var(--tap); height: var(--tap); }

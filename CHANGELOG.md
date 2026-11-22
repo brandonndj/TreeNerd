@@ -14,6 +14,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 
 ### Fixed
 - The map's data sources are now a tidy card, one source per line, that fits phones, iPads and computers.
+- The close and clear buttons have a bigger, bolder X that's easier to see and tap on phones.
 
 ## 2026-11-10: Accuracy, iPhone and iPad, reliability
 

@@ -310,6 +310,12 @@ test("phone: bottom sheet, collapsed legend, theme toggle", async () => {
   const box = await page.locator("#panel").boundingBox();
   const vp = page.viewportSize();
   assert.ok(box.y > vp.height * 0.3 && Math.abs(box.y + box.height - vp.height) < 2, "sheet sits at the bottom");
+  // the close X is drawn large enough to see: an 18-point cross in a 36-point circle
+  const x = await page.evaluate(() => {
+    const b = document.querySelector("#close"), svg = b.querySelector("svg").getBoundingClientRect();
+    return { svg: Math.round(svg.width), circle: parseFloat(getComputedStyle(b, "::before").width) };
+  });
+  assert.ok(x.svg >= 18 && x.circle >= 36, JSON.stringify(x));
   await page.tap("#close");
   assert.equal(await page.getAttribute("#legend-toggle", "aria-expanded"), "false");
   const before = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
