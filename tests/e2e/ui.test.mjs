@@ -192,6 +192,26 @@ test("a trail: trees per km, the route on the map, a ranking of trails", async (
   await top.ctx.close();
 });
 
+test("on data built before trails existed, nothing offers trails or per-resident rankings", async () => {
+  const oldBuild = (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json();
+    delete m.poi_counts; delete m.trail_trees;
+    m.place_counts = Object.fromEntries(Object.entries(m.place_counts).filter(([k]) => k !== "trail"));
+    await r.fulfill({ response: res, json: m });
+  });
+  const { ctx, page, errors } = await open("/", undefined, B, oldBuild);
+  await page.click("#q");
+  await page.waitForSelector("#results li[role=option]");
+  assert.doesNotMatch(await page.textContent("#results"), /trails/i);
+  await ctx.close();
+  const top = await open("/?top=planning_area:trees", undefined, B, oldBuild);
+  await panelTitle(top.page, "Areas: most trees");
+  const chips = await top.page.locator(".chip-btn").allTextContents();
+  assert.ok(!chips.includes("Trails") && !chips.includes("Most per resident"), chips.join(", "));
+  assert.deepEqual([...errors, ...top.errors], []);
+  await top.ctx.close();
+});
+
 test("place pages: road story, residents, amenities and heritage", async () => {
   const { ctx, page, errors } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");

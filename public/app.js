@@ -200,8 +200,11 @@ map.on("load", async () => {
   });
   // a trail's route, drawn under the trees when a trail is open
   map.addSource("trail", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  // drawn bold, with an outline, so it stands out from the basemap's own thin green paths
+  map.addLayer({ id: "trail-casing", type: "line", source: "trail", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": dark() ? "#0f1411" : "#ffffff", "line-width": ["interpolate", ["linear"], ["zoom"], 10, 6, 13, 9, 17, 14] } }, "trees");
   map.addLayer({ id: "trail", type: "line", source: "trail", layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": css("--accent"), "line-width": ["interpolate", ["linear"], ["zoom"], 11, 2, 16, 6], "line-opacity": 0.55 } }, "trees");
+    paint: { "line-color": TRAIL_COLOR(), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 13, 5, 17, 9] } }, "trees");
   // amenities, hawker centres and heritage sites for the open park, area or "near" circle
   map.addSource("pois", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "pois", type: "circle", source: "pois", paint: {
@@ -221,6 +224,7 @@ map.on("load", async () => {
 });
 
 // ---- overlays: a trail's line and points of interest
+const TRAIL_COLOR = () => (dark() ? "#ffd43b" : "#d9480f"); // not a colour the basemap or tree types use
 const POI_COLOR = { heritage: "#9c36b5", hawker: "#e8590c", amenity: "#1971c2" };
 const POI_ICON = { heritage: "🏛", hawker: "🍜", amenity: "📍" };
 const EMPTY = { type: "FeatureCollection", features: [] };
@@ -263,7 +267,8 @@ function refreshMapTheme() {
     map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
     map.setPaintProperty("sel", "circle-stroke-color", css("--accent"));
     map.setPaintProperty("near", "line-color", css("--accent"));
-    map.setPaintProperty("trail", "line-color", css("--accent"));
+    map.setPaintProperty("trail", "line-color", TRAIL_COLOR());
+    map.setPaintProperty("trail-casing", "line-color", dark() ? "#0f1411" : "#ffffff");
     map.setPaintProperty("pois", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
     buildLegendItems();
   }
@@ -437,8 +442,11 @@ const SUGGESTIONS = [
   { kind: "top", top: "tree", name: "Widest tree trunks in Singapore" },
   { kind: "top", top: "changes", name: "Trees added and removed lately", badge: "New" },
 ];
+/** Features that need data the live build may not have yet (older builds lack trails and residents). */
+const hasTrails = () => Number(state.meta?.place_counts?.trail) > 0;
+const hasResidents = () => !!state.meta?.poi_counts; // built by the same pipeline version
 function showSuggestions() {
-  items = SUGGESTIONS; active = -1;
+  items = SUGGESTIONS.filter((r) => r.top !== "trail" || hasTrails()); active = -1;
   results.innerHTML = `<li class="group" role="presentation">Explore</li>` + items.map((r, i) => `
     <li role="option" id="opt-${i}" aria-selected="false"><span class="badge">${r.badge || "Top"}</span><span class="r-name">${esc(r.name)}</span></li>`).join("");
   wireResults();
@@ -1012,9 +1020,10 @@ const TOP_KINDS = [["road", "Roads"], ["park", "Parks"], ["trail", "Trails"], ["
 const TOP_BYS = [["trees", "Most trees"], ["species", "Most species"], ["carbon", "Most carbon"],
   ["per_km", "Most per km"], ["per_resident", "Most per resident"]];
 const TOP_ONLY = { per_km: ["trail"], per_resident: ["planning_area", "subzone"] };
-const bysFor = (kind) => TOP_BYS.filter(([b]) => !TOP_ONLY[b] || TOP_ONLY[b].includes(kind));
+const bysFor = (kind) => TOP_BYS.filter(([b]) => (!TOP_ONLY[b] || TOP_ONLY[b].includes(kind)) && (b !== "per_resident" || hasResidents()));
+const topKinds = () => TOP_KINDS.filter(([k]) => k !== "trail" || hasTrails());
 async function openTop(kind = "road", by = "trees") {
-  if (!TOP_KINDS.some(([k]) => k === kind)) kind = "road";
+  if (!topKinds().some(([k]) => k === kind)) kind = "road";
   if (!bysFor(kind).some(([b]) => b === by)) by = "trees";
   const seq = ++navSeq;
   openPanel(`<p class="muted" role="status">Loading…</p>`, { sheet: "half" });
@@ -1037,8 +1046,9 @@ async function openTop(kind = "road", by = "trees") {
       : by === "carbon" ? "Top 25 in Singapore, by estimated carbon"
       : by === "per_resident" ? "Top 25, trees per 1,000 residents (2020 census). Areas with under 1,000 residents are left out."
       : by === "per_km" ? "Top 25, trees within 15 m per km of route" : "Top 25 in Singapore"}</p>
-    ${chips(TOP_KINDS, kind, "kind")}
+    ${chips(topKinds(), kind, "kind")}
     ${kind === "tree" ? "" : chips(bysFor(kind), by, "by")}
+    ${(kind === "tree" ? d.trees : d.places).length ? "" : `<p class="muted">Nothing to rank yet.</p>`}
     <ol class="list ranked">${kind === "tree"
       ? d.trees.map((t) => `<li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}${t.ht_no ? " 🌟" : ""}${t.place ? ` <span class="muted">· ${esc(t.place)}</span>` : ""}</span>
           <span class="meta">${Number(t.girth_m).toFixed(1)} m girth</span></button></li>`).join("")
