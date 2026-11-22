@@ -297,7 +297,6 @@ for (const [label, device] of IOS) {
         for (const e of document.querySelectorAll("button, a, input, summary, label, li[role=option], [role=button]")) {
           if (!shown(e)) continue;
           if (e.matches("input[type=checkbox]") && e.closest("label")) continue; // its label is the target
-          if (e.closest(".maplibregl-ctrl-attrib-inner")) continue;                // links inside the opened credits text
           const r = e.getBoundingClientRect();
           if (r.height < 43.5 || r.width < 43.5) small.push(`${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} "${(e.textContent || "").trim().slice(0, 20)}" ${Math.round(r.width)}x${Math.round(r.height)}`);
         }
@@ -315,6 +314,37 @@ for (const [label, device] of IOS) {
     }
   });
 }
+
+test("map sources card: one source per line, fits every screen, closes on Escape", async () => {
+  const sizes = [["iPhone 15 Pro", { ...devices["iPhone 15 Pro"], deviceScaleFactor: 1 }], ["iPhone landscape", { ...devices["iPhone 15 Pro landscape"], deviceScaleFactor: 1 }],
+    ["iPad Mini", { ...devices["iPad Mini"], deviceScaleFactor: 1 }], ["desktop", { viewport: { width: 1280, height: 800 } }], ["small desktop", { viewport: { width: 1024, height: 600 } }]];
+  for (const [label, opts] of sizes) {
+    const { ctx, page } = await open("/", opts);
+    await page.click(".credits-btn");
+    const r = await page.evaluate(() => {
+      const card = document.querySelector(".credits-panel"), box = card.getBoundingClientRect();
+      const rows = [...card.querySelectorAll("li")].map((li) => li.textContent.replace(/\s+/g, " ").trim());
+      const touch = matchMedia("(pointer: coarse)").matches;
+      const small = touch ? [...card.querySelectorAll("a, button")].filter((e) => e.getBoundingClientRect().height < 43.5).map((e) => e.textContent) : [];
+      return { rows, inside: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
+        overflow: document.documentElement.scrollWidth > innerWidth, small, expanded: document.querySelector(".credits-btn").getAttribute("aria-expanded"),
+        covered: (() => { const l = document.querySelector("#legend").getBoundingClientRect(), legendShown = getComputedStyle(document.querySelector("#legend")).visibility !== "hidden";
+          return legendShown && l.left < box.right && box.left < l.right && l.top < box.bottom && box.top < l.bottom; })() };
+    });
+    assert.equal(r.expanded, "true", label);
+    assert.equal(r.rows.length, 4, label);
+    assert.match(r.rows[0], /OneMap © contributors \| Singapore Land Authority/, label);
+    assert.match(r.rows[1], /Trees\.sg © National Parks Board/, label);
+    assert.ok(r.inside, `${label}: the card must sit fully on screen`);
+    assert.equal(r.covered, false, `${label}: the legend must not cover the card`);
+    assert.equal(r.overflow, false, label);
+    assert.deepEqual(r.small, [], `${label}: links in the card must be 44 points tall on touch screens`);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.isHidden(".credits-panel"), true, label);
+    assert.notEqual(await page.evaluate(() => getComputedStyle(document.querySelector("#legend")).visibility), "hidden", `${label}: the legend comes back`);
+    await ctx.close();
+  }
+});
 
 test("iPhone and iPad: the legend starts closed where it would cover the map, and opens on a tap", async () => {
   for (const device of ["iPhone 15 Pro", "iPhone 15 Pro landscape", "iPad Mini"]) {

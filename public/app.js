@@ -111,7 +111,6 @@ const map = new maplibregl.Map({
       base: {
         type: "raster", tileSize: 256, minzoom: 11, maxzoom: 19, tiles: [tileUrl(dark() ? "Night" : "Grey")],
         bounds: BASEMAP_AREA.flat(),
-        attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" style="height:16px;width:16px;vertical-align:-3px"/> <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener noreferrer">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener noreferrer">Singapore Land Authority</a>',
       },
       "inset-mask": { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "MultiPolygon",
         coordinates: INSET_MASK.map(([w, so, e, n]) => [[[w, so], [e, so], [e, n], [w, n], [w, so]]]) } } },
@@ -124,10 +123,40 @@ const map = new maplibregl.Map({
   },
 });
 map.touchZoomRotate.disableRotation();
-map.addControl(new maplibregl.AttributionControl({
-  compact: true,
-  customAttribution: 'Trees: <a href="https://treessg.nparks.gov.sg" target="_blank" rel="noopener noreferrer">Trees.sg</a> © NParks · Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> · data.gov.sg',
-}), "bottom-right");
+// Map credits: an (i) button that opens a small card, one source per line. Replaces MapLibre's own
+// attribution strip, which wrapped mid-phrase on phones and tablets.
+// Each line is one link (the whole row is the tap target), so nothing small sits inside a sentence.
+const CREDITS = [
+  ["Basemap", "https://www.onemap.gov.sg/", `<img class="om-logo" src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" width="16" height="16">OneMap © contributors | Singapore Land Authority`],
+  ["Trees", "https://treessg.nparks.gov.sg", "Trees.sg © National Parks Board"],
+  ["Roads", "https://www.openstreetmap.org/copyright", "© OpenStreetMap contributors"],
+  ["Places, trails and amenities", "https://data.gov.sg/open-data-licence", "data.gov.sg, Singapore Open Data Licence"],
+];
+class CreditsControl {
+  onAdd() {
+    const el = document.createElement("div");
+    el.className = "maplibregl-ctrl credits";
+    el.innerHTML = `
+      <div class="credits-panel" id="credits-panel" role="dialog" aria-label="Map data sources" hidden>
+        <ul>${CREDITS.map(([what, href, who]) => `<li><a class="credits-row" href="${href}" target="_blank" rel="noopener noreferrer"><span class="credits-what">${what}</span><span class="credits-who">${who}</span></a></li>`).join("")}</ul>
+        <button class="linkish credits-more" type="button">All sources and how figures are worked out</button>
+      </div>
+      <button class="credits-btn" type="button" aria-label="Map data sources" aria-controls="credits-panel" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="currentColor"/><path d="M12 10.5v6.5M12 7.2v.1" stroke="var(--surface)" stroke-width="2.4" stroke-linecap="round"/></svg>
+      </button>`;
+    const btn = el.querySelector(".credits-btn"), card = el.querySelector(".credits-panel");
+    // The legend sits above the map (and its controls), so it steps aside while the card is open.
+    const set = (open) => { card.hidden = !open; btn.setAttribute("aria-expanded", String(open)); document.body.classList.toggle("credits-open", open); };
+    btn.addEventListener("click", (e) => { e.stopPropagation(); set(card.hidden); });
+    el.querySelector(".credits-more").addEventListener("click", () => { set(false); $("#about").click(); });
+    document.addEventListener("click", (e) => !el.contains(e.target) && set(false));
+    document.addEventListener("keydown", (e) => e.key === "Escape" && !card.hidden && (set(false), btn.focus()));
+    this.el = el;
+    return el;
+  }
+  onRemove() { this.el.remove(); }
+}
+map.addControl(new CreditsControl(), "bottom-right");
 // Zoom buttons only where there's no pinch-to-zoom.
 if (!matchMedia("(pointer: coarse)").matches) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
 
@@ -152,10 +181,6 @@ function opacityExpr() {
 }
 
 map.on("load", async () => {
-  // start with the attribution collapsed behind its (i) button
-  const attrib = document.querySelector(".maplibregl-ctrl-attrib");
-  attrib?.classList.remove("maplibregl-compact-show");
-  attrib?.removeAttribute("open");
 
   const meta = await api("/api/meta").catch(() => null);
   state.meta = meta;

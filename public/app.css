@@ -151,15 +151,33 @@ details.changes summary { cursor: pointer; color: var(--accent); padding: 8px 0;
   background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-size: 14px; max-width: 90vw; text-align: center; }
 
 /* ---------- map controls ---------- */
-.maplibregl-ctrl-attrib { font-size: 11px; }
 .maplibregl-ctrl-group { background: var(--surface); }
 .maplibregl-ctrl-group button { width: 36px; height: 36px; }
 .maplibregl-ctrl-group button + button { border-top-color: var(--border); }
-.maplibregl-ctrl-attrib-button { width: 28px; height: 28px; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .maplibregl-ctrl-group button span,
-  :root:not([data-theme="light"]) .maplibregl-ctrl-attrib-button { filter: invert(1); } }
-:root[data-theme="dark"] .maplibregl-ctrl-group button span, :root[data-theme="dark"] .maplibregl-ctrl-attrib-button { filter: invert(1); }
-:root[data-theme="dark"] .maplibregl-ctrl-attrib, :root:not([data-theme="light"]) .maplibregl-ctrl-attrib { color: var(--text); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .maplibregl-ctrl-group button span { filter: invert(1); } }
+:root[data-theme="dark"] .maplibregl-ctrl-group button span { filter: invert(1); }
+
+/* map credits: (i) button and a card listing one source per line */
+.credits { position: relative; margin: 0 10px 10px 0; }
+.credits-btn { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border);
+  border-radius: 50%; background: var(--surface); color: var(--muted); box-shadow: var(--shadow); }
+.credits-btn[aria-expanded="true"] { color: var(--accent); }
+.credits-panel { position: absolute; right: 0; bottom: calc(100% + 8px); width: min(340px, calc(100vw - 24px - var(--safe-l) - var(--safe-r)));
+  max-height: calc(100dvh - 140px - var(--safe-t)); overflow: auto; overscroll-behavior: contain;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 6px 14px 8px; font-size: 13px; line-height: 1.4; text-align: left; }
+.credits-panel ul { list-style: none; margin: 0; padding: 0; }
+.credits-panel li { border-bottom: 1px solid var(--border); }
+.credits-row { display: flex; flex-direction: column; justify-content: center; gap: 1px; min-height: var(--tap); padding: 7px 0;
+  color: var(--text); text-decoration: none; }
+.credits-row:hover .credits-who, .credits-row:focus-visible .credits-who { color: var(--accent); text-decoration: underline; }
+.credits-what { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.credits-who { overflow-wrap: anywhere; }
+.om-logo { width: 16px; height: 16px; vertical-align: -3px; margin-right: 4px; }
+.credits-more { display: block; margin-top: 6px; font-size: 13px; padding: 4px 0; }
+/* side by side where there's room */
+@media (min-width: 521px) { .credits-row { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: center; } }
+body.credits-open .legend { visibility: hidden; }
 /* ---------- dev preview banner (only on dev.treenerd.fyi) ---------- */
 html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
 .dev-banner { position: fixed; z-index: 20; top: 0; left: 0; right: 0; padding: env(safe-area-inset-top, 0px) 12px 0;
@@ -169,8 +187,6 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
 .dev-banner a { color: inherit; text-decoration: underline; }
 @media (min-width: 721px) { html.is-dev .panel { top: 108px; } }
 
-.maplibregl-ctrl-attrib.maplibregl-compact, .maplibregl-ctrl-attrib { background: var(--surface); color: var(--text); }
-.maplibregl-ctrl-attrib a { color: var(--accent); }
 .maplibregl-ctrl-bottom-right { right: var(--safe-r); bottom: var(--safe-b); }
 
 /* ---------- touch screens (iPhone, iPad): every control is at least 44 x 44 points ---------- */
@@ -180,12 +196,11 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
   .foot-links { gap: 4px; }
   .foot-links a, .foot-links button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap); min-width: var(--tap); padding: 0 6px; }
   .btn, .chip-btn { min-height: var(--tap); }
+  .credits-btn { width: var(--tap); height: var(--tap); }
+  .credits-more { display: flex; align-items: center; min-height: var(--tap); }
   .chip-btn { min-width: var(--tap); }
   .linkish { display: inline-flex; align-items: center; min-height: var(--tap); min-width: var(--tap); }
   details.changes summary { min-width: var(--tap); }
-  .maplibregl-ctrl-attrib.maplibregl-compact { min-height: var(--tap); min-width: var(--tap); border-radius: 22px; }
-  .maplibregl-ctrl-attrib-button { width: var(--tap) !important; height: var(--tap) !important; background-position: center !important; background-size: 24px !important; background-repeat: no-repeat !important; }
-  .maplibregl-ctrl-attrib.maplibregl-compact-show { padding-right: var(--tap); }
 }
 
 /* ---------- tablets and landscape phones: the legend sits below the top bar, not beside it ---------- */
