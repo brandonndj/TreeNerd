@@ -1,6 +1,6 @@
 """Download every raw source listed in data/sources.json into build/raw/.
 
-Usage:  python -m pipeline.fetch [trees|tables|datagovsg|roads|wcvp|wood|all]
+Usage:  python -m pipeline.fetch [trees|tables|datagovsg|roads|wcvp|wood|trails|all]
 """
 from __future__ import annotations
 
@@ -175,6 +175,26 @@ def extract_osm_roads(pbf, dest):
     log(f"OSM: {len(feats):,} named road ways")
 
 
+def fetch_trails():
+    """NParks' named long-distance routes: one map layer per route, each a set of polylines."""
+    cfg = ARC.get("trailsService")
+    if not cfg:
+        return
+    feats = []
+    for layer in cfg["layers"]:
+        url = f"{ARC['base']}/{cfg['path']}/{layer}"
+        meta = http_json(url, {"f": "json"})
+        d = http_json(url + "/query", {"where": "1=1", "outFields": "pcn,pcn_loop", "returnGeometry": "true",
+                                       "outSR": 4326, "geometryPrecision": 7, "f": "geojson"})
+        if "error" in d:
+            raise RuntimeError(f"trail layer {layer}: {d['error']}")
+        for f in d["features"]:
+            f["properties"] = {"route": meta["name"]}
+            feats.append(f)
+        log(f"trails: {meta['name']}: {len(d['features'])} segments")
+    write_json(RAW / "arcgis_trails.geojson", {"type": "FeatureCollection", "features": feats})
+
+
 def fetch_species_reference():
     """Kew's World Checklist of Vascular Plants: fills species family/origin gaps (see pipeline/enrich.py)."""
     from .enrich import WCVP_ZIP, WCVP_URL
@@ -193,7 +213,7 @@ def main(argv):
     RAW.mkdir(parents=True, exist_ok=True)
     steps = {"trees": fetch_trees, "tables": fetch_tables,
              "datagovsg": fetch_datagovsg, "roads": fetch_roads, "wcvp": fetch_species_reference,
-             "wood": fetch_wood_density}
+             "wood": fetch_wood_density, "trails": fetch_trails}
     for name, fn in steps.items():
         if what in (name, "all"):
             fn()

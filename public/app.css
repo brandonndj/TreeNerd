@@ -107,6 +107,12 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
   font-variant-numeric: tabular-nums; text-align: right; }
 .list.ranked li button > span:first-of-type { flex: 1; min-width: 0; }
 #updated.stale { color: var(--c-user); }
+.poi-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.poi-counts .chip { font-size: 12px; }
+.maplibregl-popup.poi-popup .maplibregl-popup-content { background: var(--surface); color: var(--text); border-radius: 12px;
+  box-shadow: var(--shadow); padding: 10px 12px; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.maplibregl-popup.poi-popup .maplibregl-popup-tip { border-top-color: var(--surface); border-bottom-color: var(--surface); }
+.maplibregl-popup.poi-popup a { display: inline-flex; align-items: center; min-height: var(--tap); }
 .delta { font-weight: 700; font-variant-numeric: tabular-nums; }
 .delta.plus { color: var(--c-street); }
 .delta.minus { color: var(--c-heritage); }

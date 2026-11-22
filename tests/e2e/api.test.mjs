@@ -98,6 +98,62 @@ test("rankings and recent changes", async () => {
   assert.deepEqual(ch.builds.map((b) => [b.change, b.n]).sort(), [["added", 3], ["removed", 3]]);
 });
 
+test("trails: a place like any other, with trees per km and a route line", async () => {
+  const t = await getJson("/api/place/trail/central-cycling-paths");
+  assert.equal(t.kind, "trail");
+  assert.equal(t.tile_key, null);
+  assert.ok(t.tree_count > 0 && t.extra.length_m >= 200);
+  assert.equal(t.extra.type, "Cycling path network");
+  // The fixture keeps only the trail's trees inside its small area (the place keeps its full count),
+  // so the breakdown, id list and tree list are checked against each other.
+  const ids = (await getJson("/api/place/trail/central-cycling-paths/ids")).ids;
+  assert.ok(ids.length > 0);
+  assert.equal(t.categories.reduce((a, c) => a + c.n, 0), ids.length, "breakdown counts the trail's own trees");
+  const list = await getJson("/api/place/trail/central-cycling-paths/trees?limit=5");
+  assert.equal(list.trees.length, Math.min(5, ids.length));
+  assert.ok(list.trees.every((x) => ids.includes(x.id)));
+  const shapes = await getJson("/data/trails.geojson");
+  assert.ok(shapes.features.some((f) => f.properties.s === "central-cycling-paths"));
+  assert.equal((await getJson("/api/search?q=central+cycling")).results[0].kind, "trail");
+});
+
+test("road stories and trees per resident", async () => {
+  const road = await getJson("/api/place/road/orchard-road");
+  assert.match(road.extra.story, /Orchard/);
+  assert.match(road.extra.story_source, /National Library Board/);
+  const newton = await getJson("/api/place/planning_area/newton");
+  assert.equal(newton.extra.residents_year, 2020);
+  assert.equal(newton.extra.trees_per_1000_residents, Math.round((newton.tree_count / newton.extra.residents) * 10000) / 10);
+  const museum = await getJson("/api/place/planning_area/museum");
+  assert.ok(museum.extra.residents < 1000);
+  assert.equal(museum.extra.trees_per_1000_residents, undefined, "too few residents for a ratio");
+  const ranked = await getJson("/api/top?kind=planning_area&by=per_resident");
+  assert.ok(ranked.places.every((p) => p.extra.residents >= 1000));
+  assert.equal((await get("/api/top?kind=road&by=per_resident")).status, 400);
+  assert.equal((await getJson("/api/top?kind=trail&by=per_km")).places[0].kind, "trail");
+});
+
+test("points of interest: nearby, sorted, labelled by source", async () => {
+  const n = await getJson("/api/near?lat=1.2994&lng=103.8455&r=500");
+  assert.ok(Array.isArray(n.pois) && n.pois.length > 0);
+  assert.ok(n.pois.every((p, i) => p.dist_m <= 500 && (i === 0 || p.dist_m >= n.pois[i - 1].dist_m)));
+  assert.ok(n.pois.every((p) => ["amenity", "hawker", "heritage"].includes(p.kind) && p.name && p.class));
+  assert.ok(n.pois.every((p) => p.url === null || p.url.startsWith("https://")));
+  assert.ok(n.pois.filter((p) => p.kind === "amenity").every((p) => p.name === p.class), "amenities are named by their type");
+  const sz = await getJson("/api/place/subzone/ntsz06");
+  assert.ok(Array.isArray(sz.pois));
+  assert.equal((await getJson("/api/place/road/orchard-road")).pois, null, "roads have no amenity list");
+});
+
+test("air temperature: nearest station or nothing, never a guess", async () => {
+  assert.equal((await get("/api/weather?lat=48.85&lng=2.35")).status, 400);
+  const w = await getJson("/api/weather?lat=1.299&lng=103.846");
+  if (w.reading) { // the test machine may not reach NEA; when it does, the reading must be complete
+    assert.ok(Number.isFinite(w.reading.celsius) && w.reading.station && w.reading.dist_m >= 0);
+    assert.ok(Date.now() - Date.parse(w.reading.at) < 30 * 60_000);
+  } else assert.equal(w.reading, null);
+});
+
 test("tiles: TileJSON, a tile with trees, an empty tile, a bad address", async () => {
   const v = encodeURIComponent((await getJson("/api/meta")).built_at);
   const tj = await getJson(`/tiles/trees.json?v=${v}`);

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS species (
 
 CREATE TABLE IF NOT EXISTS places (
   id INTEGER PRIMARY KEY,
-  kind TEXT NOT NULL,               -- road | park | subzone | planning_area | pcn | constituency | heritage_road
+  kind TEXT NOT NULL,               -- road | park | subzone | planning_area | pcn | constituency | heritage_road | trail
   slug TEXT NOT NULL,
   name TEXT NOT NULL,
   alt TEXT,                         -- JSON array of alternative names
@@ -86,6 +86,35 @@ CREATE INDEX IF NOT EXISTS idx_trees_ed ON trees(ed_id);
 CREATE INDEX IF NOT EXISTS idx_trees_hr ON trees(hr_id) WHERE hr_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trees_species ON trees(species_id);
 CREATE INDEX IF NOT EXISTS idx_trees_cell ON trees(cell);
+
+-- Which trees are on which trail (within 15 m of it). A tree can be on several, so this is a table,
+-- not a column. WITHOUT ROWID: the key is the only structure, so each row is one billed write.
+CREATE TABLE IF NOT EXISTS trail_trees (
+  trail_id INTEGER NOT NULL,
+  tree_id INTEGER NOT NULL,
+  PRIMARY KEY (trail_id, tree_id)
+) WITHOUT ROWID;
+
+-- Park amenities (NParks), hawker centres (NEA), historic sites and national monuments (NHB).
+CREATE TABLE IF NOT EXISTS pois (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,               -- amenity | hawker | heritage
+  class TEXT NOT NULL,              -- e.g. Toilet, Playground, Hawker centre, Historic site
+  name TEXT NOT NULL,
+  description TEXT,
+  url TEXT,                         -- https only
+  lng REAL NOT NULL,
+  lat REAL NOT NULL,
+  cell INTEGER NOT NULL,            -- same grid as trees.cell, for "near" queries
+  park_id INTEGER,
+  subzone_id INTEGER,
+  pa_id INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_pois_cell ON pois(cell);
+CREATE INDEX IF NOT EXISTS idx_pois_park ON pois(park_id) WHERE park_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pois_subzone ON pois(subzone_id) WHERE subzone_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_pois_pa ON pois(pa_id) WHERE pa_id IS NOT NULL;
 
 -- The trees with the widest recorded trunks (the "widest trunks" ranking), widest first.
 CREATE TABLE IF NOT EXISTS top_trees (

@@ -567,6 +567,14 @@ def main():
             ht_info[int(t)] = {"ht_no": p.get("HT"), "ht_url": p.get("HYPERLINK"), "ht_desc": heritage_location(p.get("DESCRIPTION"))}
         log(f"  heritage register: {len(ht_info)}/{len(ht)} matched to a tree")
 
+    # ---- trails: named routes and cycling networks (a tree can be on several) ------------------
+    log("join: trails")
+    from . import extras
+    routes = extras.trails(pts)
+    trail_pids = [add_place("trail", r["name"], extra={"type": r["type"], "length_m": round(r["length_m"]),
+                                                       "length_km": round(r["length_m"] / 1000, 1)})
+                  for r in routes]
+
     # ---- per-tree derived ----------------------------------------------------
     log("derive: carbon, species counts, place stats")
 
@@ -619,6 +627,21 @@ def main():
             b[0], b[1] = min(b[0], t["lng"]), min(b[1], t["lat"])
             b[2], b[3] = max(b[2], t["lng"]), max(b[3], t["lat"])
 
+    def add_to(pid, t):
+        s = stats[pid]
+        s["n"] += 1
+        if t["species_id"] is not None:
+            s["species"][t["species_id"]] += 1
+        s["heritage"] += t["category"] == "heritage"
+        s["carbon"] += t["carbon_kg"] or 0
+        b = s["bbox"]
+        b[0], b[1] = min(b[0], t["lng"]), min(b[1], t["lat"])
+        b[2], b[3] = max(b[2], t["lng"]), max(b[3], t["lat"])
+
+    for pid, r in zip(trail_pids, routes):
+        for i in r["trees"]:
+            add_to(pid, trees[i])
+
     for p in places:
         s = stats.get(p["id"])
         p["tree_count"] = s["n"] if s else 0
@@ -634,6 +657,38 @@ def main():
         seen[(p["kind"], p["slug"])] += 1
         if seen[(p["kind"], p["slug"])] > 1:
             p["slug"] = f"{p['slug']}-{seen[(p['kind'], p['slug'])]}"
+    kept = {p["id"]: p for p in places_with_trees}
+
+    # trails: trees per km, the list of trees on each, and the lines for the map
+    trail_rows, kept_routes, kept_slugs = [], [], []
+    for pid, r in zip(trail_pids, routes):
+        if pid not in kept:
+            continue
+        p = kept[pid]
+        p["extra"]["trees_per_km"] = round(p["tree_count"] / (p["extra"]["length_m"] / 1000), 1)
+        trail_rows += [(pid, trees[i]["id"]) for i in r["trees"]]
+        kept_routes.append(r)
+        kept_slugs.append(p["slug"])
+    trail_geo = extras.trail_shapes(kept_routes, kept_slugs)
+
+    # residents per area (Census 2020) and the stories behind road names
+    n = extras.apply_residents(places_with_trees, extras.residents())
+    log(f"  residents: {n} planning areas and subzones")
+    extras.road_stories(places_with_trees)
+
+    # points of interest, placed in their park, subzone and planning area
+    log("join: points of interest")
+    poi_list = extras.pois()
+    if poi_list:
+        ppts = to_svy21(shapely.points([f["geometry"]["coordinates"][:2] for f in poi_list]))
+        for key, feats, ids in (("park_id", park_feats, park_ids), ("subzone_id", sz_feats, sz_ids), ("pa_id", pa_feats, pa_ids)):
+            j = polygon_join(ppts, feats, f"points of interest in {key[:-3]}s")
+            for k, poi in enumerate(poi_list):
+                pid = int(ids[j[k]]) if j[k] >= 0 else None
+                poi[key] = pid if pid in kept else None
+        for k, poi in enumerate(poi_list):
+            lng, lat = poi["geometry"]["coordinates"][:2]
+            poi.update(id=k + 1, lng=round(lng, 7), lat=round(lat, 7), cell=cell_of(lat, lng))
 
     # ---- MRT / LRT stations: search targets ("trees near Bishan MRT") -----------------------
     stations = []
@@ -660,7 +715,8 @@ def main():
 
     # ---- outputs ---------------------------------------------------------------
     write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report,
-                  stations=stations, density_report=density_report)
+                  stations=stations, density_report=density_report, trail_rows=trail_rows, trail_geo=trail_geo,
+                  pois=poi_list)
 
 
 TOP_TREES = 25  # how many of the widest trunks the ranking lists
@@ -675,7 +731,7 @@ def cell_of(lat, lng):
 
 
 def write_outputs(trees, species, places, road_source, source_edit, t0, enrichment=None, stations=(),
-                  density_report=None):
+                  density_report=None, trail_rows=(), trail_geo=None, pois=()):
     log("write: trees.geojsonl (tiles)")
     with open(OUT / "trees.geojsonl", "w") as fh:
         for t in trees:
@@ -698,7 +754,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     schema = (Path(__file__).resolve().parent.parent / "schema.sql").read_text()
     tables = re.sub(r"CREATE (UNIQUE )?INDEX[^;]+;\s*", "", schema)
     drop = "".join(f"DROP TABLE IF EXISTS {t};\n" for t in
-                   ("trees_new", "species_new", "places_new", "trees", "species", "places", "changes", "top_trees"))
+                   ("trees_new", "species_new", "places_new", "trees", "species", "places", "changes", "top_trees",
+                    "trail_trees", "pois"))
     w.raw(drop + tables + "DELETE FROM meta WHERE key='build';\n", "tables")
     sp_cols = ["id", "master_id", "scientific", "common", "aliases", "family", "growth_form",
                "native_distribution", "conservation_status", "native", "ffw_url", "tree_count",
@@ -717,6 +774,9 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     widest = sorted((t for t in trees if t["girth_m"] and not t["measure_flag"]),
                     key=lambda t: (-t["girth_m"], t["id"]))[:TOP_TREES]
     w.insert("top_trees", ["rank", "tree_id"], ([i + 1, t["id"]] for i, t in enumerate(widest)))
+    w.insert("trail_trees", ["trail_id", "tree_id"], (list(r) for r in sorted(set(trail_rows))))
+    poi_cols = ["id", "kind", "class", "name", "description", "url", "lng", "lat", "cell", "park_id", "subzone_id", "pa_id"]
+    w.insert("pois", poi_cols, ([p[c] for c in poi_cols] for p in pois))
     built = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     # trees added to / gone from the records since the previous build (see pipeline/changes.py)
@@ -748,6 +808,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
         "wood_density": density_report,
         "changes": change_summary,
         "stations": len(stations),
+        "trail_trees": len(set(trail_rows)),
+        "poi_counts": dict(Counter(p["class"] for p in pois)),
         # place kinds whose id is a property of every tree in the tiles (the app highlights by it)
         "tile_keys": TILE_KEYS,
         "species_enrichment": {k: v for k, v in (enrichment or {}).items() if k != "family_differences"},
@@ -771,6 +833,7 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
     search += [{"k": "mrt", "s": st["slug"], "n": st["name"], "a": [], "c": st["count"], "ll": [st["lat"], st["lng"]]}
                for st in stations]
     write_json(OUT / "search.json", search)
+    write_json(OUT / "trails.geojson", trail_geo or {"type": "FeatureCollection", "features": []})
     write_json(OUT / "species.json", {str(s["id"]): {
         "n": s["common"], "sci": s["scientific"], "fam": s["family"], "nat": s["native"], "c": s["tree_count"]}
         for s in species.values() if s["tree_count"]})

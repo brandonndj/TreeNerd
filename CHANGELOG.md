@@ -2,6 +2,19 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-22: Trails, amenities, heritage and more
+
+### Added
+- Trails: the Round Island Route, Coast-to-Coast Trail, Rail Corridor and NParks' other park connector routes, plus each town's cycling paths. See the route on the map, how many trees line it and how many per km. Find them in search or under "Leafiest trails and cycling routes".
+- Park amenities: toilets, drinking fountains, playgrounds, shelters, BBQ pits, fitness corners and more, shown on park pages and around any spot. Hawker centres too.
+- Heritage nearby: historic sites and national monuments around you, alongside heritage trees, with links to the National Heritage Board's pages.
+- Trees per 1,000 residents for each area and subzone, from the 2020 census, with a ranking. Areas with under 1,000 residents get no figure.
+- About this road: a short description from the National Library Board for about 110 roads.
+- Live air temperature at the nearest NEA weather station, with its name and distance, on park pages and around any spot.
+
+### Fixed
+- The map's data sources are now a tidy card, one source per line, that fits phones, iPads and computers.
+
 ## 2026-11-10: Accuracy, iPhone and iPad, reliability
 
 ### Accuracy

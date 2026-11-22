@@ -103,8 +103,8 @@ cheaper design, and say what a change will cost before making it.
 
 - **Know what is billed.** The database bills every row written, index entries included, and every
   row read. Storage bills per operation. Requests to the Worker are billed too.
-- **Data updates are the main cost.** Each one rewrites the whole database: about 6.3 million rows
-  written, with 50 million a month included. Updates run weekly, which uses about 27 million.
+- **Data updates are the main cost.** Each one rewrites the whole database: about 6.5 million rows
+  written, with 50 million a month included. Updates run weekly, which uses about 28 million.
 - **Don't add what multiplies writes:** extra data updates, automatic rebuild triggers, or full
   indexes on the tree table (each costs up to 890,000 writes per update). Prefer partial indexes
   and small precomputed tables.

@@ -176,6 +176,47 @@ test("old data is labelled as overdue", async () => {
   await ctx.close();
 });
 
+test("a trail: trees per km, the route on the map, a ranking of trails", async () => {
+  const { ctx, page, errors } = await open("/?p=trail/central-cycling-paths");
+  await panelTitle(page, "Central cycling paths");
+  const text = await page.textContent("#panel-body");
+  assert.match(text, /trees per km/);
+  assert.match(text, /km long/);
+  assert.match(text, /within 15 m of the route/);
+  await page.waitForFunction(() => performance.getEntriesByType("resource").some((e) => e.name.includes("/data/trails.geojson")));
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  const top = await open("/?top=trail:per_km");
+  await panelTitle(top.page, "Trails: most per km");
+  assert.ok((await top.page.locator(".ranked li").count()) >= 1);
+  await top.ctx.close();
+});
+
+test("place pages: road story, residents, amenities and heritage", async () => {
+  const { ctx, page, errors } = await open("/?p=road/orchard-road");
+  await panelTitle(page, "Orchard Road");
+  assert.match(await page.textContent("#panel-body"), /About this road[\s\S]*National Library Board/);
+  await ctx.close();
+  const area = await open("/?p=planning_area/newton");
+  await panelTitle(area.page, "Newton");
+  assert.match(await area.page.textContent("#panel-body"), /trees per 1,000 residents[\s\S]*2020 census/);
+  await area.ctx.close();
+  const small = await open("/?p=planning_area/museum");
+  await panelTitle(small.page, "Museum");
+  assert.match(await small.page.textContent("#panel-body"), /too few for a per-resident figure/);
+  await small.ctx.close();
+  const near = await open("/?near=1.2994,103.8455,500");
+  await near.page.waitForSelector("#panel-body h2");
+  assert.match(await near.page.textContent("#panel-body"), /Within 500 m/);
+  const first = near.page.locator("#panel-body button[data-poi]").first();
+  if (await first.count()) { // a named place (hawker centre or heritage site) opens its card on the map
+    await first.click();
+    await near.page.waitForSelector(".poi-popup");
+  }
+  assert.deepEqual([...errors, ...near.errors], []);
+  await near.ctx.close();
+});
+
 test("recent changes on a place and across Singapore", async () => {
   const { ctx, page, errors, h2 } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");
@@ -281,7 +322,8 @@ test("phone: bottom sheet, collapsed legend, theme toggle", async () => {
 // ---- iPhone and iPad: the devices TreeNerd is mostly used on
 const IOS = [["iPhone portrait", "iPhone 15 Pro"], ["iPhone landscape", "iPhone 15 Pro landscape"],
   ["iPad Mini portrait", "iPad Mini"], ["iPad Pro 11 portrait", "iPad Pro 11"], ["iPad Pro 11 landscape", "iPad Pro 11 landscape"]];
-const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes"];
+const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes",
+  "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident"];
 
 for (const [label, device] of IOS) {
   test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {

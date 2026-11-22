@@ -27,7 +27,7 @@ Rules for this repository:
 - Always optimise cost (see "Cost" in PRINCIPLES.md): choose the cheapest design that still meets
   the three requirements, and tell the owner what a change will cost to run before making it.
 - Cost: a data update rewrites the whole database, and the database bills every row written,
-  index entries included (about 6.3 million per update; 50 million a month are included). Updates run
+  index entries included (about 6.5 million per update; 50 million a month are included). Updates run
   weekly. Don't start extra data updates, add full indexes on `trees`, or add rebuild triggers
   without telling the owner what it will cost.
 - Keep the repository free of secrets and account-specific setup details.

@@ -72,6 +72,22 @@
           "DESCRIPT"
         ]
       }
+    },
+    "trailsService": {
+      "path": "Park_Connector_Trails_WFL1/FeatureServer",
+      "layers": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ],
+      "use": "NParks' named long-distance routes (Round Island Route, Coast-to-Coast Trail, Rail Corridor and others)"
     }
   },
   "datagovsg": {
@@ -222,6 +238,46 @@
           "STATION_NA",
           "EXIT_CODE"
         ]
+      },
+      "cycling_paths": {
+        "id": "d_8f468b25193f64be8a16fa7d8f60f553",
+        "required": false,
+        "fields": [
+          "CYL_PATH",
+          "AGENCY_MAINT"
+        ]
+      },
+      "hawker_centres": {
+        "id": "d_4a086da0a5553be1d89383cd90d07ecd",
+        "required": false,
+        "fields": [
+          "NAME",
+          "STATUS",
+          "ADDRESS_MYENV",
+          "NUMBER_OF_COOKED_FOOD_STALLS"
+        ]
+      },
+      "historic_sites": {
+        "id": "d_31e16b12809e66673e90d8b04fdee1b2",
+        "required": false,
+        "fields": [
+          "NAME",
+          "DESCRIPTION",
+          "HYPERLINK"
+        ]
+      },
+      "monuments": {
+        "id": "d_b29c230ec6b609e29ed42f71ca9a8767",
+        "required": false,
+        "fields": [
+          "NAME",
+          "DESCRIPTION",
+          "HYPERLINK"
+        ]
+      },
+      "streets_and_places": {
+        "id": "d_9606da8c76387bf74627b3e7797f781d",
+        "required": false
       }
     },
     "realtimeApis": {
@@ -280,7 +336,8 @@
     "roadMaxDistanceM": 30,
     "pcnMaxDistanceM": 15,
     "heritageMatchM": 15,
-    "stationRadiusM": 250
+    "stationRadiusM": 250,
+    "trailMaxDistanceM": 15
   },
   "speciesReference": {
     "name": "World Checklist of Vascular Plants (WCVP)",
@@ -306,5 +363,10 @@
   },
   "previousBuild": {
     "use": "The last published build (trees.csv.gz, meta.json, changes.json), used to list trees added to or removed from the records. Supplied by the workflow from storage; optional."
+  },
+  "weather": {
+    "airTemperature": "https://api-open.data.gov.sg/v2/real-time/api/air-temperature",
+    "attribution": "Air temperature: National Environment Agency, via data.gov.sg",
+    "use": "Live reading at the nearest NEA station (shown with the station's name and distance)"
   }
 }

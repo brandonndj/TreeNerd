@@ -17,7 +17,11 @@ Every build must meet three requirements, in this order: **accuracy**, a good **
 - **Place summaries**: tree and species counts, share of native species, estimated carbon, heritage trees, and top species (tap one to filter the map). Each summary lists its largest trees and offers a CSV download.
 - **Tree cards**: species, girth, height, age, estimated carbon, and the road, park, area and constituency the tree is in. Heritage trees include their story.
 - **Trees near me**, using your location, or anywhere: press and hold the map on a phone or tablet, or right-click on a computer.
-- **Rankings**: the roads, parks and areas with the most trees, species or stored carbon, and the widest trunks. Tap the empty search box to find them.
+- **Trails**: NParks' park connector routes (Round Island Route, Coast-to-Coast Trail, Rail Corridor and others) and each town's cycling paths, with the route drawn on the map and trees per km.
+- **Amenities and heritage**: park toilets, fountains, playgrounds, shelters and more, hawker centres, and historic sites and national monuments, on park pages and around any spot.
+- **Trees per resident** for each area and subzone (2020 census), and **road descriptions** from the National Library Board.
+- **Live air temperature** at the nearest NEA weather station.
+- **Rankings**: the roads, parks, trails and areas with the most trees, species, stored carbon, trees per km or trees per resident, and the widest trunks. Tap the empty search box to find them.
 - **Recent changes**: trees added to, or no longer in, NParks' records, for each place and for the whole island.
 - **Made for phones**: a resizable bottom sheet and large tap targets. It can be installed to the home screen.
 - **Light and dark themes**: follows your device by default and can be switched from the map.
@@ -29,12 +33,12 @@ Every view has its own URL:
 
 | URL | Opens |
 |---|---|
-| `/?p=road/orchard-road` | A place. Kinds: `road`, `park`, `subzone`, `planning_area`, `pcn`, `constituency`, `heritage_road` |
+| `/?p=road/orchard-road` | A place. Kinds: `road`, `park`, `trail`, `subzone`, `planning_area`, `pcn`, `constituency`, `heritage_road` |
 | `/?s=3106` | A species |
 | `/?t=12561254` | A single tree |
 | `/?near=1.3039,103.8359,150` | Trees within 150 m of a point (radius 100, 150, 250 or 500) |
 | `/?q=238859` | The app with a search already filled in |
-| `/?top=road:trees` | A ranking: a kind of place, then `trees`, `species` or `carbon`. `/?top=tree` lists the widest trunks |
+| `/?top=road:trees` | A ranking: a kind of place, then `trees`, `species`, `carbon`, `per_km` (trails) or `per_resident` (areas, subzones). `/?top=tree` lists the widest trunks |
 | `/?top=changes` | Trees recently added or removed |
 
 Add `&c=1,2` to show only some tree types (1 street, 2 park, 3 Botanic Gardens, 4 planted by public, 5 conservation, 6 heritage), and `#map=zoom/lat/lng` to set the map view.
@@ -94,6 +98,8 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 | `/api/species/{id}` | One species, with where it's most common |
 | `/api/near?lat=&lng=&r=` | Trees within `r` metres (10–600) of a point in Singapore |
 | `/api/top?kind=&by=` | Rankings |
+| `/api/weather?lat=&lng=` | Latest air temperature at the nearest NEA station |
+| `/data/trails.geojson` | The trail routes, for drawing on a map |
 | `/api/changes` | Trees recently added or removed |
 | `/api/health` | 200 when everything is present and the data is fresh, otherwise 503 |
 | `/data/trees.csv.gz` | Every tree, as one CSV |
@@ -120,6 +126,10 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
   - If more than 5% of trees appear or disappear in one update, it's treated as a data problem and nothing is logged.
   - The log covers about six months.
 - **Stations**: an MRT or LRT station is the centre of its exits; its tree count is the trees within 250 m.
+- **Trails** count the trees within 15 m of the route. A tree can be on several. Nature reserve trails aren't listed: the inventory records managed trees, not the forest, so their counts would be misleadingly small.
+- **Trees per resident** uses the 2020 census, which counts residents only, so business and industrial areas score high. Areas with under 1,000 residents get no figure.
+- **Air temperature** is the latest reading (under 30 minutes old) at the nearest of NEA's weather stations, shown with the station's name and distance. It is not a measure of how much trees cool a place.
+- **Amenities** are named by their type; NParks' own labels are shown as the description.
 - **Freshness**: the data is rebuilt once a week. The app shows the date of the last update, and says so if an update is overdue.
 
 ## Privacy
@@ -152,7 +162,12 @@ Ideas, bugs or questions: join our [Telegram channel](https://t.me/treenerd). To
 - Boundaries, parks and heritage data: [data.gov.sg](https://data.gov.sg), under the [Singapore Open Data Licence](https://data.gov.sg/open-data-licence)
 - Roads © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright), [ODbL](https://opendatacommons.org/licenses/odbl/). The derived tree-to-road assignments are available under the ODbL.
 - Basemap and address search: [OneMap](https://www.onemap.gov.sg) © Singapore Land Authority
-- MRT and LRT station exits: Land Transport Authority, via [data.gov.sg](https://data.gov.sg)
+- MRT and LRT station exits, cycling paths: Land Transport Authority, via [data.gov.sg](https://data.gov.sg)
+- Park connector routes and park amenities: National Parks Board
+- Hawker centres and live air temperature: National Environment Agency, via data.gov.sg
+- Historic sites and national monuments: National Heritage Board, via data.gov.sg
+- Road descriptions: National Library Board (Streets and Places), via data.gov.sg
+- Residents: Census of Population 2020, Department of Statistics, via data.gov.sg
 - Wood density: [Global Wood Density Database v.2](https://doi.org/10.5281/zenodo.16919509), Fischer et al. 2026 ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
 - Missing species families and origins: [WCVP](https://powo.science.kew.org/about-wcvp), World Checklist of Vascular Plants, facilitated by the Royal Botanic Gardens, Kew ([CC BY 4.0](https://creativecommons.org/licenses/by/4.0/))
 - Libraries: MapLibre GL JS and PMTiles (BSD-3-Clause)

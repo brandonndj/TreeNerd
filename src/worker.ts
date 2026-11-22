@@ -31,7 +31,11 @@ const PLACE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id",
   pcn: "pcn_id", constituency: "ed_id", heritage_road: "hr_id",
 };
-const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json"]);
+const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson"]);
+// Files that belong to one database build ("<name>-a.<ext>" / "-b"); see getSlotObject.
+const SLOT_FILES: Record<string, [string, string]> = { "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"] };
+/** Kinds of place that have a page: the column-based ones, plus trails (a tree can be on several). */
+const PLACE_KINDS = new Set([...Object.keys(PLACE_COLUMN), "trail"]);
 // Place columns present in the changes table (trees added to / gone from the records).
 const CHANGE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id", constituency: "ed_id",
@@ -47,6 +51,7 @@ const ALLOWED_PARAMS: Record<string, string[]> = {
   place: ["species", "sort", "limit", "offset"],
   geocode: ["q"],
   top: ["kind", "by"],
+  weather: ["lat", "lng"],
   changes: [],
 };
 
@@ -182,30 +187,56 @@ async function speciesNames(env: Env, ids: number[]) {
   return new Map(results.map((r) => [r.id as number, r]));
 }
 
+/**
+ * The SQL condition (on trees aliased "t", one bound parameter: the place id) that selects a place's
+ * trees. Column names come only from the fixed PLACE_COLUMN map, never from user input.
+ */
+function placeCondition(kind: string) {
+  if (kind === "trail") return "t.id IN (SELECT tree_id FROM trail_trees WHERE trail_id=?)";
+  return `t.${PLACE_COLUMN[kind]}=?`;
+}
+
 async function getPlace(env: Env, kind: string, slug: string) {
-  const col = PLACE_COLUMN[kind];
-  if (!col || !SLUG_RE.test(slug)) throw new HttpError(404, "not found");
+  if (!PLACE_KINDS.has(kind) || !SLUG_RE.test(slug)) throw new HttpError(404, "not found");
   const place = await env.DB.prepare("SELECT * FROM places WHERE kind=? AND slug=?").bind(kind, slug).first();
   if (!place) throw new HttpError(404, "not found");
-  return { place, col };
+  return { place, cond: placeCondition(kind) };
+}
+
+// ---------------------------------------------------------------- points of interest
+const POI_COLUMN: Record<string, string> = { park: "park_id", subzone: "subzone_id", planning_area: "pa_id" };
+const POI_FIELDS = "id, kind, class, name, description, url, lng, lat";
+
+/** Amenities, hawker centres and heritage sites inside a park or area. Builds before this feature have no table. */
+async function placePois(env: Env, kind: string, id: number) {
+  const col = POI_COLUMN[kind];
+  if (!col) return null;
+  try {
+    const { results } = await env.DB.prepare(
+      `SELECT ${POI_FIELDS} FROM pois WHERE ${col}=? ORDER BY kind DESC, class, name LIMIT 400`,
+    ).bind(id).all<Row>();
+    return results;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------- API routes
 async function apiSearch(url: URL, env: Env) {
   const q = (url.searchParams.get("q") ?? "").slice(0, 100);
-  const kinds = url.searchParams.get("kind")?.split(",").filter((k) => k in PLACE_COLUMN || k === "species" || k === "mrt").slice(0, 8);
+  const kinds = url.searchParams.get("kind")?.split(",").filter((k) => PLACE_KINDS.has(k) || k === "species" || k === "mrt").slice(0, 8);
   const idx = await getSearch(env);
   return json({ q, results: idx.search(q, { kinds: kinds?.length ? kinds : undefined, limit: intParam(url, "limit", 12, 1, 50) }) });
 }
 
 async function apiPlace(env: Env, kind: string, slug: string) {
-  const { place, col } = await getPlace(env, kind, slug);
+  const { place, cond } = await getPlace(env, kind, slug);
   const [cats, sizes, heights, natives] = await env.DB.batch([
-    env.DB.prepare(`SELECT category k, count(*) n FROM trees WHERE ${col}=? GROUP BY 1 ORDER BY 2 DESC`).bind(place.id),
-    env.DB.prepare(`SELECT size k, count(*) n FROM trees WHERE ${col}=? GROUP BY 1`).bind(place.id),
-    env.DB.prepare(`SELECT height_band k, count(*) n FROM trees WHERE ${col}=? GROUP BY 1`).bind(place.id),
+    env.DB.prepare(`SELECT t.category k, count(*) n FROM trees t WHERE ${cond} GROUP BY 1 ORDER BY 2 DESC`).bind(place.id),
+    env.DB.prepare(`SELECT t.size k, count(*) n FROM trees t WHERE ${cond} GROUP BY 1`).bind(place.id),
+    env.DB.prepare(`SELECT t.height_band k, count(*) n FROM trees t WHERE ${cond} GROUP BY 1`).bind(place.id),
     env.DB.prepare(
-      `SELECT s.native k, count(*) n FROM trees t LEFT JOIN species s ON s.id=t.species_id WHERE t.${col}=? GROUP BY 1`,
+      `SELECT s.native k, count(*) n FROM trees t LEFT JOIN species s ON s.id=t.species_id WHERE ${cond} GROUP BY 1`,
     ).bind(place.id),
   ]);
   const top = parseJSON<[number, number][]>(place.top_species, []);
@@ -214,6 +245,7 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   const tileKeys = ((await getMeta(env))?.tile_keys ?? { road: "r", park: "p", planning_area: "a" }) as Record<string, string>;
   return json({
     changes: await placeChanges(env, kind, place.id as number),
+    pois: await placePois(env, kind, place.id as number),
     kind, slug, name: place.name, alt: parseJSON(place.alt, []),
     tree_count: place.tree_count, species_count: place.species_count,
     heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
@@ -226,10 +258,10 @@ async function apiPlace(env: Env, kind: string, slug: string) {
 }
 
 async function apiPlaceTrees(url: URL, env: Env, kind: string, slug: string, format: "json" | "csv" | "ids") {
-  const { place, col } = await getPlace(env, kind, slug);
+  const { place, cond } = await getPlace(env, kind, slug);
   const species = url.searchParams.get("species");
   if (species && !ID_RE.test(species)) throw new HttpError(400, "invalid species");
-  const where = `t.${col}=?` + (species ? " AND t.species_id=?" : "");
+  const where = cond + (species ? " AND t.species_id=?" : "");
   const binds: unknown[] = [place.id, ...(species ? [Number(species)] : [])];
 
   if (format === "ids") {
@@ -294,7 +326,7 @@ async function apiNear(url: URL, env: Env) {
     for (let x = lng - dLng; x <= lng + dLng + 0.002; x += 0.002) cells.add(cellOf(Math.min(y, lat + dLat), Math.min(x, lng + dLng)));
   const ids = [...cells];
   const { results } = await env.DB.prepare(
-    `SELECT t.id, t.lng, t.lat, t.species_id, s.common, s.scientific, t.girth_m, t.height_band, t.category
+    `SELECT t.id, t.lng, t.lat, t.species_id, s.common, s.scientific, t.girth_m, t.height_band, t.category, t.ht_no
        FROM trees t LEFT JOIN species s ON s.id=t.species_id
       WHERE t.cell IN (${ids.map(() => "?").join(",")}) AND t.lat BETWEEN ? AND ? AND t.lng BETWEEN ? AND ?`,
   ).bind(...ids, lat - dLat, lat + dLat, lng - dLng, lng + dLng).all<Row>();
@@ -302,6 +334,13 @@ async function apiNear(url: URL, env: Env) {
     .map((t): Row & { dist_m: number } => ({ ...t, dist_m: Math.round(haversine(lat, lng, t.lat as number, t.lng as number)) }))
     .filter((t) => t.dist_m <= r)
     .sort((a, b) => a.dist_m - b.dist_m);
+  // amenities, hawker centres and heritage sites in the same circle (none before this feature's first build)
+  const poiRows = await env.DB.prepare(
+    `SELECT ${POI_FIELDS} FROM pois WHERE cell IN (${ids.map(() => "?").join(",")}) AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?`,
+  ).bind(...ids, lat - dLat, lat + dLat, lng - dLng, lng + dLng).all<Row>().then((r) => r.results, () => null);
+  const pois = poiRows === null ? null : poiRows
+    .map((p): Row & { dist_m: number } => ({ ...p, dist_m: Math.round(haversine(lat, lng, p.lat as number, p.lng as number)) }))
+    .filter((p) => p.dist_m <= r).sort((a, b) => a.dist_m - b.dist_m);
   const species = new Map<string, number>();
   for (const t of trees) {
     const k = String(t.common ?? t.scientific ?? "Unknown");
@@ -311,6 +350,7 @@ async function apiNear(url: URL, env: Env) {
     lat, lng, r, count: trees.length,
     species: [...species].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, n]) => ({ name, n })),
     trees: trees.slice(0, limit),
+    pois,
   }, 200, 600);
 }
 
@@ -390,7 +430,12 @@ async function apiHealth(env: Env) {
 }
 
 /** Rankings: places of one kind by trees / species / carbon, or the trees with the widest trunks. */
-const TOP_BY: Record<string, string> = { trees: "tree_count", species: "species_count", carbon: "carbon_kg" };
+const TOP_BY: Record<string, string> = {
+  trees: "tree_count", species: "species_count", carbon: "carbon_kg",
+  per_km: "json_extract(extra, '$.trees_per_km')", per_resident: "json_extract(extra, '$.trees_per_1000_residents')",
+};
+// Rankings that only make sense for some kinds of place.
+const TOP_ONLY: Record<string, string[]> = { per_km: ["trail"], per_resident: ["planning_area", "subzone"] };
 async function apiTop(url: URL, env: Env) {
   const kind = url.searchParams.get("kind") ?? "road";
   if (kind === "tree") {
@@ -407,12 +452,57 @@ async function apiTop(url: URL, env: Env) {
     return json({ kind, by: "girth", trees: results }, 200, 21600);
   }
   const by = url.searchParams.get("by") ?? "trees";
-  if (!(kind in PLACE_COLUMN) || !(by in TOP_BY)) throw new HttpError(400, "invalid ranking");
-  // The column name comes from the fixed TOP_BY map, never from user input.
+  if (!PLACE_KINDS.has(kind) || !(by in TOP_BY) || (TOP_ONLY[by] && !TOP_ONLY[by].includes(kind))) {
+    throw new HttpError(400, "invalid ranking");
+  }
+  // The expression comes from the fixed TOP_BY map, never from user input. Places without the
+  // figure (e.g. areas with too few residents) are left out, not ranked last.
   const { results } = await env.DB.prepare(
-    `SELECT kind, slug, name, tree_count, species_count, carbon_kg FROM places WHERE kind=? ORDER BY ${TOP_BY[by]} DESC LIMIT 25`,
+    `SELECT kind, slug, name, tree_count, species_count, carbon_kg, extra FROM places
+      WHERE kind=? AND ${TOP_BY[by]} IS NOT NULL ORDER BY ${TOP_BY[by]} DESC LIMIT 25`,
   ).bind(kind).all<Row>();
+  for (const r of results) r.extra = parseJSON(r.extra, {});
   return json({ kind, by, places: results }, 200, 21600);
+}
+
+// ---------------------------------------------------------------- live air temperature (NEA)
+const AIR_TEMP = "https://api-open.data.gov.sg/v2/real-time/api/air-temperature";
+interface NeaStation { id: string; name: string; location?: { latitude: number; longitude: number } }
+interface NeaReading { timestamp: string; data: { stationId: string; value: number }[] }
+
+/**
+ * The latest air temperature at the NEA weather station nearest a point. One upstream request per
+ * two minutes at most, whoever asks (edge-cached). Readings older than 30 minutes are not shown.
+ */
+async function apiWeather(url: URL, ctx: ExecutionContext) {
+  const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
+  if (!(lat > 1.1 && lat < 1.5 && lng > 103.5 && lng < 104.2)) throw new HttpError(400, "location must be in Singapore");
+  const cache = caches.default, key = new Request(AIR_TEMP);
+  let res = await cache.match(key);
+  if (!res) {
+    try {
+      const up = await fetch(AIR_TEMP, { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
+      if (!up.ok) throw new Error(`NEA returned ${up.status}`);
+      res = new Response(await up.text(), { headers: { "content-type": "application/json", "cache-control": "public, max-age=120" } });
+      ctx.waitUntil(cache.put(key, res.clone()));
+    } catch (e) {
+      console.error("air temperature unavailable:", String(e));
+      return json({ reading: null }, 200, 60);
+    }
+  }
+  const d = (await res.json<{ data?: { stations?: NeaStation[]; readings?: NeaReading[] } }>()).data;
+  const latest = d?.readings?.[0];
+  const values = new Map((latest?.data ?? []).map((r) => [r.stationId, r.value]));
+  const nearest = (d?.stations ?? [])
+    .filter((s) => s.location && values.has(s.id) && Number.isFinite(values.get(s.id)))
+    .map((s) => ({ s, dist_m: Math.round(haversine(lat, lng, s.location!.latitude, s.location!.longitude)) }))
+    .sort((a, b) => a.dist_m - b.dist_m)[0];
+  const at = latest ? Date.parse(latest.timestamp) : NaN;
+  if (!nearest || !Number.isFinite(at) || Date.now() - at > 30 * 60_000) return json({ reading: null }, 200, 60);
+  return json({
+    reading: { celsius: values.get(nearest.s.id), station: nearest.s.name, dist_m: nearest.dist_m, at: latest!.timestamp },
+    source: "National Environment Agency, via data.gov.sg",
+  }, 200, 60);
 }
 
 // ---------------------------------------------------------------- address search (OneMap)
@@ -465,12 +555,13 @@ function pathParts(url: URL) {
   }
 }
 
-async function api(env: Env, url: URL): Promise<Response> {
+async function api(env: Env, url: URL, ctx: ExecutionContext): Promise<Response> {
   const p = pathParts(url);
   if (p[0] === "meta") return json((await getMeta(env)) ?? { built_at: null }, 200, 300);
   if (p[0] === "search") return apiSearch(url, env);
   if (p[0] === "near") return apiNear(url, env);
   if (p[0] === "top") return apiTop(url, env);
+  if (p[0] === "weather" && p.length === 1) return apiWeather(url, ctx);
   if (p[0] === "changes" && p.length === 1) return apiChanges(env);
   if (p[0] === "geocode") return apiGeocode(url, env);
   if (p[0] === "tree" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiTree(env, Number(p[1]));
@@ -508,7 +599,7 @@ async function cachedApi(request: Request, env: Env, ctx: ExecutionContext, url:
   const cache = caches.default;
   const hit = await cache.match(key);
   if (hit) return hit;
-  const res = await api(env, clean);
+  const res = await api(env, clean, ctx);
   if (res.status === 200) ctx.waitUntil(cache.put(key, res.clone()));
   return res;
 }
@@ -517,9 +608,9 @@ async function cachedApi(request: Request, env: Env, ctx: ExecutionContext, url:
 async function data(request: Request, env: Env, url: URL) {
   const key = url.pathname.slice("/data/".length);
   if (!R2_PUBLIC.has(key)) throw new HttpError(404, "not found");
-  // the species list must match the live database; everything else is the latest published file
-  const obj: R2ObjectBody | R2Object | null = key === "species.json"
-    ? await getSlotObject(env, "species", "json", { range: request.headers, onlyIf: request.headers })
+  // the species list and trail lines must match the live database; everything else is the latest published file
+  const obj: R2ObjectBody | R2Object | null = SLOT_FILES[key]
+    ? await getSlotObject(env, ...SLOT_FILES[key], { range: request.headers, onlyIf: request.headers })
     : await env.DATA.get(key, { range: request.headers, onlyIf: request.headers });
   if (!obj) throw new HttpError(404, "not found");
   const headers = new Headers();

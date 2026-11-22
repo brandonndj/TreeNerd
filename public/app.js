@@ -18,6 +18,7 @@ const CATS = [
 const KIND_LABEL = {
   road: "Road", park: "Park", subzone: "Subzone", planning_area: "Planning area", pcn: "Park connector",
   constituency: "Constituency", heritage_road: "Heritage road", species: "Species", address: "Address", mrt: "Station",
+  trail: "Trail",
 };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const catColor = (key) => css(`--c-${key}`);
@@ -197,6 +198,16 @@ map.on("load", async () => {
       "circle-stroke-opacity": opacityExpr(),
     },
   });
+  // a trail's route, drawn under the trees when a trail is open
+  map.addSource("trail", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "trail", type: "line", source: "trail", layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": css("--accent"), "line-width": ["interpolate", ["linear"], ["zoom"], 11, 2, 16, 6], "line-opacity": 0.55 } }, "trees");
+  // amenities, hawker centres and heritage sites for the open park, area or "near" circle
+  map.addSource("pois", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "pois", type: "circle", source: "pois", paint: {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 17, 8],
+    "circle-color": ["match", ["get", "kind"], "heritage", POI_COLOR.heritage, "hawker", POI_COLOR.hawker, POI_COLOR.amenity],
+    "circle-stroke-width": 2, "circle-stroke-color": dark() ? "#0f1411" : "#ffffff" } });
   map.addSource("sel", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 8, 18, 18], "circle-color": "transparent",
@@ -208,6 +219,37 @@ map.on("load", async () => {
   wireMapEvents();
   restoreFromUrl();
 });
+
+// ---- overlays: a trail's line and points of interest
+const POI_COLOR = { heritage: "#9c36b5", hawker: "#e8590c", amenity: "#1971c2" };
+const POI_ICON = { heritage: "🏛", hawker: "🍜", amenity: "📍" };
+const EMPTY = { type: "FeatureCollection", features: [] };
+let trailShapes = null;
+async function showTrail(slug) {
+  if (!slug) return map.getSource("trail")?.setData(EMPTY);
+  try {
+    trailShapes ||= await fetch(`/data/trails.geojson?v=${encodeURIComponent(state.meta?.built_at || "")}`).then((r) => (r.ok ? r.json() : EMPTY));
+  } catch { trailShapes = EMPTY; }
+  map.getSource("trail")?.setData({ type: "FeatureCollection", features: trailShapes.features.filter((f) => f.properties.s === slug) });
+}
+function showPois(rows) {
+  map.getSource("pois")?.setData({ type: "FeatureCollection", features: (rows || []).map((p) => ({ type: "Feature",
+    geometry: { type: "Point", coordinates: [Number(p.lng), Number(p.lat)] },
+    properties: { kind: p.kind, class: p.class, name: p.name, description: p.description || "", url: p.url || "" } })) });
+}
+function clearOverlays() { showTrail(null); showPois(null); popup?.remove(); }
+let popup = null;
+/** A tapped amenity or heritage site: a small card on the map. */
+function poiPopup(f) {
+  const p = f.properties, url = safeUrl(p.url);
+  popup?.remove();
+  popup = new maplibregl.Popup({ closeButton: false, maxWidth: "280px", className: "poi-popup", offset: 10 })
+    .setLngLat(f.geometry.coordinates)
+    .setHTML(`<b>${POI_ICON[p.kind] || ""} ${esc(p.name)}</b><br><span class="muted">${esc(p.class)}</span>
+      ${p.description ? `<br>${esc(p.description.length > 160 ? `${p.description.slice(0, 157)}…` : p.description)}` : ""}
+      ${url ? `<br><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Read more ↗</a>` : ""}`)
+    .addTo(map);
+}
 
 function refreshMapTheme() {
   applyThemeAttr();
@@ -221,6 +263,8 @@ function refreshMapTheme() {
     map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
     map.setPaintProperty("sel", "circle-stroke-color", css("--accent"));
     map.setPaintProperty("near", "line-color", css("--accent"));
+    map.setPaintProperty("trail", "line-color", css("--accent"));
+    map.setPaintProperty("pois", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
     buildLegendItems();
   }
 }
@@ -267,6 +311,10 @@ function wireMapEvents() {
   map.on("mouseleave", "trees", () => { map.getCanvas().style.cursor = ""; hover.hidden = true; });
   map.on("click", (e) => {
     if (Date.now() - heldAt < 800) return; // the finger lifting after a press-and-hold isn't a tap
+    const r = matchMedia("(pointer: coarse)").matches ? 16 : 8;
+    const poi = map.getLayer("pois") && map.queryRenderedFeatures([[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]], { layers: ["pois"] })[0];
+    if (poi) return poiPopup(poi); // amenities sit on top of the trees, and are fewer
+    popup?.remove();
     const cands = treesAt(e.point);
     if (!cands.length) {
       if (isPhone() && !panel.hidden) setSheet("peek");
@@ -384,6 +432,7 @@ $("#clear").addEventListener("click", () => { q.value = ""; $("#clear").hidden =
 const SUGGESTIONS = [
   { kind: "top", top: "road", name: "Roads with the most trees" },
   { kind: "top", top: "park", name: "Parks with the most trees" },
+  { kind: "top", top: "trail", by: "per_km", name: "Leafiest trails and cycling routes" },
   { kind: "top", top: "planning_area", name: "Areas with the most trees" },
   { kind: "top", top: "tree", name: "Widest tree trunks in Singapore" },
   { kind: "top", top: "changes", name: "Trees added and removed lately", badge: "New" },
@@ -438,7 +487,7 @@ function showResults() { results.hidden = false; q.setAttribute("aria-expanded",
 function hideResults() { results.hidden = true; q.setAttribute("aria-expanded", "false"); q.removeAttribute("aria-activedescendant"); }
 function choose(r) {
   hideResults();
-  if (r.kind === "top") { q.blur(); return r.top === "changes" ? openChanges() : openTop(r.top); }
+  if (r.kind === "top") { q.blur(); return r.top === "changes" ? openChanges() : openTop(r.top, r.by); }
   q.value = r.name; $("#clear").hidden = false; q.blur();
   if (r.kind === "address") nearby(r.lat, r.lng, 150, { title: r.name, sub: r.address });
   else if (r.kind === "mrt") nearby(r.lat, r.lng, 250, { title: r.name, sub: "Station" });
@@ -471,7 +520,7 @@ function closePanel() {
   panel.hidden = true; document.body.classList.remove("panel-open");
   document.documentElement.style.setProperty("--sheet-offset", "0px");
   state.place = state.species = state.tree = null;
-  setHighlight(null); selectPoint(null);
+  setHighlight(null); selectPoint(null); clearOverlays();
   map.getSource("near")?.setData({ type: "FeatureCollection", features: [] });
   setUrl({});
 }
@@ -593,6 +642,9 @@ async function openPlace(kind, slug, bbox, fly = true) {
   state.place = d; state.species = null; state.placeSpecies = null;
   setUrl({ p: `${kind}/${slug}` });
   if (fly) fitBbox(d.bbox || bbox, kind === "road" ? 18 : 17);
+  popup?.remove();
+  showTrail(kind === "trail" ? d.slug : null);
+  showPois(d.pois);
   await highlightPlace(d);
   if (seq === navSeq) renderPlace(d);
 }
@@ -617,11 +669,17 @@ function renderPlace(d) {
     <h2>${esc(d.name)}</h2>
     <p class="sub">${esc(sub)}${d.alt?.length ? ` · ${esc(d.alt.join(" · "))}` : ""}</p>
     <div class="stats">
-      ${statTile(fmt.format(d.tree_count), "trees")}
+      ${statTile(fmt.format(d.tree_count), d.kind === "trail" ? "trees within 15 m" : "trees")}
       ${statTile(fmt.format(d.species_count), "species")}
       ${statTile(`${nativePct}%`, `of trees are native species${unknownPct ? ` · ${unknownPct}% unknown origin` : ""}`)}
       ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
+      ${extra.trees_per_km != null ? statTile(fmt.format(extra.trees_per_km), `trees per km · ${fmt.format(extra.length_km)} km long`) : ""}
+      ${extra.trees_per_1000_residents != null ? statTile(fmt.format(extra.trees_per_1000_residents), "trees per 1,000 residents") : ""}
     </div>
+    ${residentsNote(extra)}
+    ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within 15 m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
+    ${extra.story ? `<h3>About this road</h3><p>${esc(extra.story)}</p><p class="note">From the ${esc(extra.story_source || "National Library Board")}.</p>` : ""}
+
     ${d.heritage_count ? `<div class="callout">🌟 ${d.heritage_count} heritage tree${d.heritage_count > 1 ? "s" : ""}</div>` : ""}
     ${safeUrl(extra.url) ? `<p><a href="${esc(safeUrl(extra.url))}" target="_blank" rel="noopener noreferrer">About this heritage road ↗</a></p>` : ""}
     <h3>Tree types</h3>${categoryStack(d.categories, d.tree_count)}
@@ -630,6 +688,8 @@ function renderPlace(d) {
     <div id="place-species">${barList(species, d.tree_count, { onclick: true, active: state.placeSpecies })}</div>
     <h3>Largest trees</h3>
     <ul class="list" id="tree-list"></ul>
+    ${poiSection(d.pois, d.kind === "park" ? "In this park" : "Places here")}
+    ${d.kind === "park" ? `<p id="weather" class="note"></p>` : ""}
     ${changesSection(d.changes)}
     <div class="actions">
       <button class="btn" id="more">Show more</button>
@@ -644,6 +704,8 @@ function renderPlace(d) {
   }));
   $("#share").addEventListener("click", share);
   wireChangeRows();
+  wirePoiRows(d.pois);
+  if (d.kind === "park" && d.bbox) showWeather((d.bbox[1] + d.bbox[3]) / 2, (d.bbox[0] + d.bbox[2]) / 2);
   loadTreeList(d, 0);
   $("#more").addEventListener("click", () => loadTreeList(d, $("#tree-list").children.length));
 }
@@ -674,6 +736,7 @@ async function openSpecies(id, fly = true) {
   catch (e) { return seq === navSeq && openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
   if (seq !== navSeq) return;
   state.species = s; state.place = null;
+  clearOverlays();
   setUrl({ s: id });
   setHighlight(["==", ["get", "s"], s.id]);
   if (fly) map.flyTo({ center: [103.8198, 1.3521], zoom: 11.3, padding: panelPadding() });
@@ -819,12 +882,18 @@ async function nearby(lat, lng, r = 150, label = null) {
   map.getSource("near")?.setData({ type: "Feature", geometry: { type: "LineString", coordinates: circle }, properties: {} });
   setHighlight(["in", ["get", "id"], ["literal", d.trees.map((t) => t.id)]]);
   selectPoint(label ? [lng, lat] : null);
+  popup?.remove(); showTrail(null); showPois(d.pois);
+  const heritageTrees = d.trees.filter((t) => t.ht_no);
   openPanel(`
     <h2>${label ? esc(label.title) : `Trees within ${r} m`}</h2>
     ${label ? `<p class="sub">${label.sub ? `${esc(label.sub)} · ` : ""}trees within ${r} m</p>` : ""}
     <div class="stats">${statTile(fmt.format(d.count), "trees")}${statTile(d.trees.length ? `${Number(d.trees[0].dist_m)} m` : "—", "to the nearest tree")}</div>
+    <p id="weather" class="note"></p>
     <h3>Species here</h3>${barList(d.species.map((s) => ({ label: s.name, n: s.n })), d.count)}
-    <h3>Nearest</h3>
+    ${heritageTrees.length ? `<h3>Heritage trees here</h3><ul class="list">${heritageTrees.map((t) => `<li><button data-id="${Number(t.id)}"><span>🌟 ${esc(t.common || t.scientific || "Tree")}</span>
+      <span class="meta">${Number(t.dist_m)} m</span></button></li>`).join("")}</ul>` : ""}
+    ${poiSection(d.pois, `Within ${r} m`, true)}
+    <h3>Nearest trees</h3>
     <ul class="list">${d.trees.slice(0, 40).map((t) => `<li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}</span>
       <span class="meta">${Number(t.dist_m)} m${t.girth_m ? ` · ${t.girth_m.toFixed(1)} m girth` : ""}</span></button></li>`).join("")}</ul>
     <div class="actions">${[100, 250, 500].filter((x) => x !== r).map((x) => `<button class="btn" data-r="${x}">${x} m</button>`).join("")}
@@ -834,6 +903,53 @@ async function nearby(lat, lng, r = 150, label = null) {
   body.querySelectorAll("button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
   body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
   $("#share").addEventListener("click", share);
+  wirePoiRows(d.pois);
+  showWeather(lat, lng);
+}
+
+// ---- points of interest in panels
+function residentsNote(extra) {
+  if (extra.trees_per_1000_residents != null) {
+    return `<p class="note">Per resident: ${fmt.format(extra.residents)} residents in the 2020 census. Workers, students and visitors aren't counted, so business and industrial areas score high.</p>`;
+  }
+  if (extra.residents) return `<p class="note">Only ${fmt.format(extra.residents)} residents in the 2020 census, too few for a per-resident figure.</p>`;
+  return "";
+}
+/** Counts by type, then heritage sites and hawker centres by name (amenities are on the map). */
+function poiSection(rows, title, withDistance = false) {
+  if (!rows?.length) return "";
+  const counts = new Map();
+  for (const p of rows) if (p.kind === "amenity") counts.set(p.class, (counts.get(p.class) || 0) + 1);
+  const named = rows.filter((p) => p.kind !== "amenity").slice(0, 30);
+  const row = (p, i) => `<li><button data-poi="${i}"><span>${POI_ICON[p.kind]} ${esc(p.name)} <span class="muted">· ${esc(p.class)}</span></span>
+    <span class="meta">${withDistance ? `${Number(p.dist_m)} m` : ""}</span></button></li>`;
+  return `<h3>${esc(title)}</h3>
+    ${counts.size ? `<div class="poi-counts">${[...counts].sort((a, b) => b[1] - a[1]).map(([c, n]) =>
+      `<span class="chip"><span class="dot" style="background:${POI_COLOR.amenity}"></span>${esc(c)} ${fmt.format(n)}</span>`).join("")}</div>` : ""}
+    ${named.length ? `<ul class="list">${named.map((p) => row(p, rows.indexOf(p))).join("")}</ul>` : ""}
+    <p class="note">Amenities: NParks. Hawker centres: NEA. Historic sites and national monuments: National Heritage Board. Tap a dot on the map for details.</p>`;
+}
+function wirePoiRows(rows) {
+  body.querySelectorAll("button[data-poi]").forEach((b) => b.addEventListener("click", () => {
+    const p = rows[Number(b.dataset.poi)];
+    const f = { properties: { ...p, description: p.description || "", url: p.url || "" }, geometry: { coordinates: [Number(p.lng), Number(p.lat)] } };
+    map.easeTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17), padding: panelPadding(), duration: 600 });
+    if (isPhone()) setSheet("peek");
+    poiPopup(f);
+  }));
+}
+
+// ---- live air temperature (NEA): the nearest station's reading, said plainly as such
+async function showWeather(lat, lng) {
+  const el = $("#weather");
+  if (!el) return;
+  let d;
+  try { d = await api(`/api/weather?lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`); } catch { return; }
+  const w = d.reading;
+  if (!w || !$("#weather")) return;
+  const km = w.dist_m >= 1000 ? `${(w.dist_m / 1000).toFixed(1)} km` : `${w.dist_m} m`;
+  const time = new Date(w.at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
+  $("#weather").textContent = `🌡 Air temperature ${Number(w.celsius).toFixed(1)} °C at NEA's ${w.station} station, ${km} away (${time}).`;
 }
 
 // ---- changes: trees added to / no longer in NParks' records
@@ -870,7 +986,7 @@ async function openChanges() {
   catch (e) { return seq === navSeq && openPanel(`<h2>Recent changes</h2><p class="muted">${esc(e.message)}</p>`); }
   if (seq !== navSeq) return;
   state.place = state.species = null;
-  setHighlight(null); selectPoint(null);
+  setHighlight(null); selectPoint(null); clearOverlays();
   setUrl({ top: "changes" });
   const byBuild = new Map();
   for (const b of d.builds) {
@@ -891,12 +1007,15 @@ async function openChanges() {
 }
 
 // ---- rankings
-const TOP_KINDS = [["road", "Roads"], ["park", "Parks"], ["planning_area", "Areas"], ["subzone", "Subzones"],
+const TOP_KINDS = [["road", "Roads"], ["park", "Parks"], ["trail", "Trails"], ["planning_area", "Areas"], ["subzone", "Subzones"],
   ["constituency", "Constituencies"], ["tree", "Widest trunks"]];
-const TOP_BYS = [["trees", "Most trees"], ["species", "Most species"], ["carbon", "Most carbon"]];
+const TOP_BYS = [["trees", "Most trees"], ["species", "Most species"], ["carbon", "Most carbon"],
+  ["per_km", "Most per km"], ["per_resident", "Most per resident"]];
+const TOP_ONLY = { per_km: ["trail"], per_resident: ["planning_area", "subzone"] };
+const bysFor = (kind) => TOP_BYS.filter(([b]) => !TOP_ONLY[b] || TOP_ONLY[b].includes(kind));
 async function openTop(kind = "road", by = "trees") {
   if (!TOP_KINDS.some(([k]) => k === kind)) kind = "road";
-  if (!TOP_BYS.some(([b]) => b === by)) by = "trees";
+  if (!bysFor(kind).some(([b]) => b === by)) by = "trees";
   const seq = ++navSeq;
   openPanel(`<p class="muted" role="status">Loading…</p>`, { sheet: "half" });
   let d;
@@ -904,23 +1023,29 @@ async function openTop(kind = "road", by = "trees") {
   catch (e) { return seq === navSeq && openPanel(`<h2>Rankings</h2><p class="muted">${esc(e.message)}</p>`); }
   if (seq !== navSeq) return;
   state.place = state.species = null;
-  setHighlight(null); selectPoint(null);
+  setHighlight(null); selectPoint(null); clearOverlays();
   setUrl({ top: kind === "tree" ? "tree" : `${kind}:${by}` });
   const chips = (list, on, attr) => `<div class="chips">${list.map(([k, label]) =>
     `<button class="chip-btn${k === on ? " on" : ""}" data-${attr}="${k}" aria-pressed="${k === on}">${label}</button>`).join("")}</div>`;
-  const value = (r) => (by === "carbon" ? tonnes(r.carbon_kg) : fmt.format(by === "species" ? r.species_count : r.tree_count));
+  const value = (r) => ({
+    carbon: tonnes(r.carbon_kg), species: `${fmt.format(r.species_count)} species`, trees: `${fmt.format(r.tree_count)} trees`,
+    per_km: `${fmt.format(r.extra?.trees_per_km)} per km`, per_resident: `${fmt.format(r.extra?.trees_per_1000_residents)} per 1,000`,
+  }[by]);
   openPanel(`
     <h2>${kind === "tree" ? "Widest tree trunks" : `${esc(TOP_KINDS.find(([k]) => k === kind)[1])}: ${esc(TOP_BYS.find(([b]) => b === by)[1].toLowerCase())}`}</h2>
-    <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump." : by === "carbon" ? "Top 25 in Singapore, by estimated carbon" : "Top 25 in Singapore"}</p>
+    <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump."
+      : by === "carbon" ? "Top 25 in Singapore, by estimated carbon"
+      : by === "per_resident" ? "Top 25, trees per 1,000 residents (2020 census). Areas with under 1,000 residents are left out."
+      : by === "per_km" ? "Top 25, trees within 15 m per km of route" : "Top 25 in Singapore"}</p>
     ${chips(TOP_KINDS, kind, "kind")}
-    ${kind === "tree" ? "" : chips(TOP_BYS, by, "by")}
+    ${kind === "tree" ? "" : chips(bysFor(kind), by, "by")}
     <ol class="list ranked">${kind === "tree"
       ? d.trees.map((t) => `<li><button data-id="${Number(t.id)}"><span>${esc(t.common || t.scientific || "Tree")}${t.ht_no ? " 🌟" : ""}${t.place ? ` <span class="muted">· ${esc(t.place)}</span>` : ""}</span>
           <span class="meta">${Number(t.girth_m).toFixed(1)} m girth</span></button></li>`).join("")
       : d.places.map((r) => `<li><button data-kind="${esc(r.kind)}" data-slug="${esc(r.slug)}"><span>${esc(r.name)}</span>
-          <span class="meta">${value(r)}${by === "carbon" ? "" : by === "species" ? " species" : " trees"}</span></button></li>`).join("")}</ol>
+          <span class="meta">${value(r)}</span></button></li>`).join("")}</ol>
     <div class="actions"><button class="btn" id="share">🔗 Share</button></div>`, { sheet: "half" });
-  body.querySelectorAll("button[data-kind].chip-btn").forEach((b) => b.addEventListener("click", () => openTop(b.dataset.kind, by)));
+  body.querySelectorAll("button[data-kind].chip-btn").forEach((b) => b.addEventListener("click", () => openTop(b.dataset.kind, bysFor(b.dataset.kind).some(([x]) => x === by) ? by : "trees")));
   body.querySelectorAll("button[data-by]").forEach((b) => b.addEventListener("click", () => openTop(kind, b.dataset.by)));
   body.querySelectorAll(".ranked button[data-kind]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.kind, b.dataset.slug)));
   body.querySelectorAll(".ranked button[data-id]").forEach((b) => b.addEventListener("click", () => openTree(Number(b.dataset.id))));
@@ -944,6 +1069,8 @@ $("#about").addEventListener("click", () => {
         <li>Roads © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors (ODbL)</li>
         <li>Basemap and address search: <a href="https://www.onemap.gov.sg" target="_blank" rel="noopener noreferrer">OneMap</a> © Singapore Land Authority</li>
         <li>Missing species families and origins: <a href="https://powo.science.kew.org/about-wcvp" target="_blank" rel="noopener noreferrer">World Checklist of Vascular Plants</a>, Royal Botanic Gardens, Kew (CC BY 4.0)</li>
+        <li>Trails: NParks park connector routes; cycling paths: Land Transport Authority, via data.gov.sg</li>
+        <li>Park amenities: NParks. Hawker centres and live air temperature: National Environment Agency. Historic sites and national monuments: National Heritage Board. Road descriptions: National Library Board. Residents: Census of Population 2020, Department of Statistics. All via data.gov.sg (Singapore Open Data Licence).</li>
         <li>Wood density: <a href="https://doi.org/10.5281/zenodo.16919509" target="_blank" rel="noopener noreferrer">Global Wood Density Database v.2</a>, Fischer et al. 2026 (CC BY 4.0)</li>
         <li>MRT and LRT stations: Land Transport Authority, via data.gov.sg</li>
       </ul>
@@ -953,6 +1080,9 @@ $("#about").addEventListener("click", () => {
         <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
         <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than 2.1 m across, which the model doesn't cover.</li>
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
+        <li><b>Trails</b> count the trees NParks records within 15 m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
+        <li><b>Trees per resident</b> uses the 2020 census, which counts residents only. Areas with under 1,000 residents get no figure.</li>
+        <li><b>Air temperature</b> is the latest reading at the nearest of NEA's 17 weather stations, with its name and distance. It isn't a measure of how much trees cool a place.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>
