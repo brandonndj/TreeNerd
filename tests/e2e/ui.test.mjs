@@ -226,7 +226,7 @@ test("temperature card: shown near the top with station and distance, hidden wit
         fits: r.left >= 0 && r.right <= innerWidth, tempSize: parseFloat(getComputedStyle(el.querySelector(".weather-temp")).fontSize) };
     });
     assert.match(card.text, /31\.5 ?°C/);
-    assert.match(card.text, /Air temperature now/);
+    assert.doesNotMatch(card.text, /Air temperature now/); // the time of the reading says when
     assert.match(card.text, /Somerset Road station/);
     assert.match(card.text, /1\.2 km away/);
     assert.match(card.text, /isn't a measure of how much the trees cool/);

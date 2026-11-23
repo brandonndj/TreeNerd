@@ -948,7 +948,7 @@ function wirePoiRows(rows) {
 }
 
 // ---- live air temperature (NEA): the nearest station's reading, said plainly as such
-const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Air temperature now" hidden></div>`;
+const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Air temperature" hidden></div>`;
 /** Fill the temperature card once a fresh reading arrives; it stays hidden otherwise. */
 async function showWeather(lat, lng) {
   if (!$("#weather")) return;
@@ -965,8 +965,7 @@ async function showWeather(lat, lng) {
     <div class="weather-main">
       <svg class="weather-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7" stroke-width="2.6"/></svg>
-      <div class="weather-reading"><span class="weather-temp">${c.toFixed(1)}<span class="weather-unit">°C</span></span>
-        <span class="weather-label">Air temperature now</span></div>
+      <div class="weather-reading"><span class="weather-temp">${c.toFixed(1)}<span class="weather-unit">°C</span></span></div>
     </div>
     <div class="weather-where">
       <span>${esc(w.station)} station</span>
