@@ -1109,12 +1109,12 @@ $("#about").addEventListener("click", () => {
       ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. ${state.stale ? "An update is overdue, so recent changes by NParks aren't shown yet." : "It refreshes every week."}</p>` : ""}
       <h3>How it's worked out</h3>
       <ul>
-        <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
+        <li><b>Roads</b> are matched to the nearest named road within 30 m. A park tree that close to a road counts for both, so it appears on the road's page and the park's.</li>
         <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than 2.1 m across, which the model doesn't cover.</li>
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
         <li><b>Trails</b> count the trees NParks records within 15 m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
         <li><b>Trees per resident</b> uses the 2020 census, which counts residents only. Areas with under 1,000 residents get no figure.</li>
-        <li><b>Air temperature</b> is the latest reading at the nearest of NEA's 17 weather stations, with its name and distance. It isn't a measure of how much trees cool a place.</li>
+        <li><b>Air temperature</b> is the latest reading at the nearest NEA weather station, shown with the station's name and distance. It isn't a measure of how much trees cool a place.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>

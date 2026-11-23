@@ -75,7 +75,7 @@ Cloudflare Worker
 | `src/search.ts` | Fuzzy search over places and species |
 | `src/geocode.ts` | Address-search helpers (query clean-up, result parsing) |
 | `src/pages.ts` | Page titles, link previews, sitemap |
-| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed), `audit.py` (accuracy audit run before publishing) |
+| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed), `extras.py` (trails, amenities, heritage sites, residents, road descriptions), `audit.py` (accuracy audit run before publishing) |
 | `data/sources.json` | Upstream sources used by the pipeline |
 | `schema.sql` | Database schema |
 | `tools/announce.py` | Posts new changelog entries to the Telegram channel |
@@ -106,11 +106,11 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 
 ## Methodology
 
-- **Roads are derived, not supplied.** The source data has no street field. Each tree is assigned to the nearest named road within 30 m, with main roads preferred over walkways and driveways. About 83% of trees are matched to a road; most of the rest are in parks.
+- **Roads are derived, not supplied.** The source data has no street field. Each tree is assigned to the nearest named road within 30 m, with main roads preferred over walkways and driveways. About 83% of trees are matched to a road; just over half of the rest are in parks. A park tree within 30 m of a named road counts for both the road and the park (about 29% of park trees).
 - **Areas** (subzones, planning areas, parks, constituencies, conservation areas) are assigned by point-in-polygon.
 - **Carbon is an estimate.** It uses a standard pantropical allometric model (Chave et al., 2014) on girth, height band and wood density, with 47% of biomass counted as carbon. Treat it as indicative.
   - **Wood density** comes from the [Global Wood Density Database v.2](https://doi.org/10.5281/zenodo.16919509). A tree uses the value for its species (about 80% of trees; names are matched as NParks records them, then by Kew's accepted name), otherwise the average for its genus (15%), otherwise the average across the matched trees (5%).
-  - **No estimate is made where the model doesn't apply**: palms, pandans and bamboo (about 29,000 trees), and trunks recorded as wider than 2.12 m across (about 360 trees, mostly figs measured around their aerial roots). The model was fitted to trunks 5–212 cm in diameter; before this limit, single figs were credited with up to 490 tonnes. Place totals leave these trees out.
+  - **No estimate is made where the model doesn't apply**: palms, pandans and bamboo (about 29,000 trees), and trunks recorded as wider than 2.12 m across (about 370 trees, mostly figs measured around their aerial roots). The model was fitted to trunks 5–212 cm in diameter; before this limit, single figs were credited with up to 490 tonnes. Place totals leave these trees out.
   - The model was built for forest trees, so it's still rough for heavily pruned street trees.
 - **Every update is audited before it's published.** Every place and species figure is re-counted from the tree table, and 300 random trees are compared with NParks' live records. If anything disagrees, the update stops and the site keeps its previous data.
 - **Heights are banded** (3 m bands) as published by the source.

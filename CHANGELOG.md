@@ -2,10 +2,13 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
-## 2026-11-23: Temperature card
+## 2026-11-23: Temperature card, and corrections
 
 ### Changed
 - The live air temperature is now a card near the top of park pages and "near" views: a large reading, the NEA station it comes from, how far away it is, and when it was taken. The card's colour runs from blue to red on Singapore's own scale: blue under 26 °C, teal to 29 °C, amber to 31 °C, orange to 33 °C, red above.
+
+### Fixed
+- The About panel said trees in parks are listed under the park. In fact a park tree within 30 m of a named road counts for both the road and the park (about 29% of park trees), so it appears on both pages. The text now says so.
 
 ## 2026-11-22: Trails, amenities, heritage and more
 
