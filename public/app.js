@@ -685,6 +685,7 @@ function renderPlace(d) {
       ${extra.trees_per_1000_residents != null ? statTile(fmt.format(extra.trees_per_1000_residents), "trees per 1,000 residents") : ""}
     </div>
     ${residentsNote(extra)}
+    ${d.kind === "park" ? WEATHER_SLOT : ""}
     ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within 15 m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
     ${extra.story ? `<h3>About this road</h3><p>${esc(extra.story)}</p><p class="note">From the ${esc(extra.story_source || "National Library Board")}.</p>` : ""}
 
@@ -697,7 +698,6 @@ function renderPlace(d) {
     <h3>Largest trees</h3>
     <ul class="list" id="tree-list"></ul>
     ${poiSection(d.pois, d.kind === "park" ? "In this park" : "Places here")}
-    ${d.kind === "park" ? `<p id="weather" class="note"></p>` : ""}
     ${changesSection(d.changes)}
     <div class="actions">
       <button class="btn" id="more">Show more</button>
@@ -896,7 +896,7 @@ async function nearby(lat, lng, r = 150, label = null) {
     <h2>${label ? esc(label.title) : `Trees within ${r} m`}</h2>
     ${label ? `<p class="sub">${label.sub ? `${esc(label.sub)} · ` : ""}trees within ${r} m</p>` : ""}
     <div class="stats">${statTile(fmt.format(d.count), "trees")}${statTile(d.trees.length ? `${Number(d.trees[0].dist_m)} m` : "—", "to the nearest tree")}</div>
-    <p id="weather" class="note"></p>
+    ${WEATHER_SLOT}
     <h3>Species here</h3>${barList(d.species.map((s) => ({ label: s.name, n: s.n })), d.count)}
     ${heritageTrees.length ? `<h3>Heritage trees here</h3><ul class="list">${heritageTrees.map((t) => `<li><button data-id="${Number(t.id)}"><span>🌟 ${esc(t.common || t.scientific || "Tree")}</span>
       <span class="meta">${Number(t.dist_m)} m</span></button></li>`).join("")}</ul>` : ""}
@@ -948,16 +948,32 @@ function wirePoiRows(rows) {
 }
 
 // ---- live air temperature (NEA): the nearest station's reading, said plainly as such
+const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Air temperature now" hidden></div>`;
+/** Fill the temperature card once a fresh reading arrives; it stays hidden otherwise. */
 async function showWeather(lat, lng) {
-  const el = $("#weather");
-  if (!el) return;
+  if (!$("#weather")) return;
   let d;
   try { d = await api(`/api/weather?lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`); } catch { return; }
-  const w = d.reading;
-  if (!w || !$("#weather")) return;
+  const w = d.reading, el = $("#weather");
+  if (!w || !el) return;
+  const c = Number(w.celsius);
   const km = w.dist_m >= 1000 ? `${(w.dist_m / 1000).toFixed(1)} km` : `${w.dist_m} m`;
   const time = new Date(w.at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
-  $("#weather").textContent = `🌡 Air temperature ${Number(w.celsius).toFixed(1)} °C at NEA's ${w.station} station, ${km} away (${time}).`;
+  // a band for the colour only; the number is what's shown
+  el.dataset.band = c >= 33 ? "hot" : c >= 30 ? "warm" : c >= 26 ? "mild" : "cool";
+  el.innerHTML = `
+    <div class="weather-main">
+      <svg class="weather-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7" stroke-width="2.6"/></svg>
+      <div class="weather-reading"><span class="weather-temp">${c.toFixed(1)}<span class="weather-unit">°C</span></span>
+        <span class="weather-label">Air temperature now</span></div>
+    </div>
+    <div class="weather-where">
+      <span>${esc(w.station)} station</span>
+      <span class="muted">${km} away · ${esc(time)}</span>
+    </div>
+    <p class="weather-note">Latest reading from the nearest NEA weather station. It isn't a measure of how much the trees cool this spot.</p>`;
+  el.hidden = false;
 }
 
 // ---- changes: trees added to / no longer in NParks' records

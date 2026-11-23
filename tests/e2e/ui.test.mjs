@@ -212,6 +212,36 @@ test("on data built before trails existed, nothing offers trails or per-resident
   await top.ctx.close();
 });
 
+test("temperature card: shown near the top with station and distance, hidden without a fresh reading", async () => {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString();
+  const reading = (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: {
+    reading: { celsius: 31.46, station: "Somerset Road", dist_m: 1234, at }, source: "National Environment Agency, via data.gov.sg" } }));
+  for (const opts of [{ ...devices["iPhone 15 Pro"], deviceScaleFactor: 1 }, { viewport: { width: 1280, height: 800 } }]) {
+    const { ctx, page, errors } = await open("/?near=1.2994,103.8455,250", opts, B, reading);
+    await page.waitForSelector("#weather:not([hidden])");
+    const card = await page.evaluate(() => {
+      const el = document.querySelector("#weather"), r = el.getBoundingClientRect();
+      const tiles = document.querySelector("#panel-body .stats").getBoundingClientRect();
+      return { text: el.innerText.replace(/\s+/g, " "), band: el.dataset.band, below: r.top >= tiles.bottom - 1,
+        fits: r.left >= 0 && r.right <= innerWidth, tempSize: parseFloat(getComputedStyle(el.querySelector(".weather-temp")).fontSize) };
+    });
+    assert.match(card.text, /31\.5 ?°C/);
+    assert.match(card.text, /Air temperature now/);
+    assert.match(card.text, /Somerset Road station/);
+    assert.match(card.text, /1\.2 km away/);
+    assert.match(card.text, /isn't a measure of how much the trees cool/);
+    assert.equal(card.band, "warm");
+    assert.ok(card.below && card.fits && card.tempSize >= 28, JSON.stringify(card));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  const none = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: { reading: null } })));
+  await none.page.waitForSelector("#panel-body h2");
+  await none.page.waitForTimeout(500);
+  assert.equal(await none.page.isHidden("#weather"), true, "no card, and no empty box, without a reading");
+  await none.ctx.close();
+});
+
 test("place pages: road story, residents, amenities and heritage", async () => {
   const { ctx, page, errors } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");

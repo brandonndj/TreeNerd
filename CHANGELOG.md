@@ -2,6 +2,11 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-23: Temperature card
+
+### Changed
+- The live air temperature is now a card near the top of park pages and "near" views: a large reading, the NEA station it comes from, how far away it is, and when it was taken. The card's colour shifts from green to red as it gets hotter.
+
 ## 2026-11-22: Trails, amenities, heritage and more
 
 ### Added
