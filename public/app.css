@@ -118,10 +118,12 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 .weather-card { --w: var(--c-street); display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 14px;
   margin: 0 0 14px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--w) 35%, var(--border));
   background: linear-gradient(135deg, color-mix(in srgb, var(--w) 16%, var(--surface)), color-mix(in srgb, var(--w) 5%, var(--surface))); }
-.weather-card[data-band="hot"] { --w: #e03131; }
-.weather-card[data-band="warm"] { --w: #f08c00; }
-.weather-card[data-band="mild"] { --w: #1c7ed6; }
-.weather-card[data-band="cool"] { --w: #0ca678; }
+/* blue (coolest) to red (hottest); bands in app.js (tempBand) */
+.weather-card[data-band="cool"] { --w: #1c7ed6; }
+.weather-card[data-band="mild"] { --w: #0c8599; }
+.weather-card[data-band="warm"] { --w: #f59f00; }
+.weather-card[data-band="hot"] { --w: #f76707; }
+.weather-card[data-band="very-hot"] { --w: #e03131; }
 .weather-main { display: flex; align-items: center; gap: 8px; }
 .weather-icon { color: var(--w); flex: none; }
 .weather-reading { display: flex; flex-direction: column; line-height: 1.1; }

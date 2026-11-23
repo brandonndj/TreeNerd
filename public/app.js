@@ -948,6 +948,14 @@ function wirePoiRows(rows) {
 }
 
 // ---- live air temperature (NEA): the nearest station's reading, said plainly as such
+/**
+ * The card's colour, blue (cool) to red (very hot), on Singapore's own scale. From NEA's 2024
+ * readings (6.9 million, all stations): under 26 °C is the coolest 5% (rain, small hours), 26-29
+ * is a typical night or morning, 29-31 a typical day, 31-33 a hot afternoon, 33 and up the
+ * hottest 2%. Only the colour changes; the number is what's shown.
+ */
+const TEMP_BANDS = [[33, "very-hot"], [31, "hot"], [29, "warm"], [26, "mild"], [-Infinity, "cool"]];
+const tempBand = (c) => TEMP_BANDS.find(([min]) => c >= min)[1];
 const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Air temperature" hidden></div>`;
 /** Fill the temperature card once a fresh reading arrives; it stays hidden otherwise. */
 async function showWeather(lat, lng) {
@@ -959,8 +967,7 @@ async function showWeather(lat, lng) {
   const c = Number(w.celsius);
   const km = w.dist_m >= 1000 ? `${(w.dist_m / 1000).toFixed(1)} km` : `${w.dist_m} m`;
   const time = new Date(w.at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
-  // a band for the colour only; the number is what's shown
-  el.dataset.band = c >= 33 ? "hot" : c >= 30 ? "warm" : c >= 26 ? "mild" : "cool";
+  el.dataset.band = tempBand(c);
   el.innerHTML = `
     <div class="weather-main">
       <svg class="weather-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">

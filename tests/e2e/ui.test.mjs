@@ -230,10 +230,18 @@ test("temperature card: shown near the top with station and distance, hidden wit
     assert.match(card.text, /Somerset Road station/);
     assert.match(card.text, /1\.2 km away/);
     assert.match(card.text, /isn't a measure of how much the trees cool/);
-    assert.equal(card.band, "warm");
+    assert.equal(card.band, "hot");
     assert.ok(card.below && card.fits && card.tempSize >= 28, JSON.stringify(card));
     assert.deepEqual(errors, []);
     await ctx.close();
+  }
+  // blue is the coolest, red the hottest, on Singapore's scale
+  for (const [celsius, band] of [[25.9, "cool"], [26, "mild"], [29, "warm"], [31, "hot"], [33, "very-hot"]]) {
+    const t = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: {
+      reading: { celsius, station: "Somerset Road", dist_m: 500, at } } })));
+    await t.page.waitForSelector("#weather:not([hidden])");
+    assert.equal(await t.page.getAttribute("#weather", "data-band"), band, `${celsius} °C`);
+    await t.ctx.close();
   }
   const none = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: { reading: null } })));
   await none.page.waitForSelector("#panel-body h2");
