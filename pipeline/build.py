@@ -810,6 +810,10 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
         "stations": len(stations),
         "trail_trees": len(set(trail_rows)),
         "poi_counts": dict(Counter(p["class"] for p in pois)),
+        # the limits the method uses, so the app's explanations always match this build
+        "method": {"road_max_m": ROAD_MAX, "trail_max_m": extras.TRAIL_MAX, "station_radius_m": JOINS.get("stationRadiusM", 250),
+                   "carbon_max_diameter_cm": round(CARBON_MAX_GIRTH_M / math.pi * 100),
+                   "min_residents": extras.MIN_RESIDENTS, "residents_year": extras.RESIDENTS_YEAR},
         # place kinds whose id is a property of every tree in the tiles (the app highlights by it)
         "tile_keys": TILE_KEYS,
         "species_enrichment": {k: v for k, v in (enrichment or {}).items() if k != "family_differences"},

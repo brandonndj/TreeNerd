@@ -30,4 +30,7 @@ Rules for this repository:
   index entries included (about 6.5 million per update; 50 million a month are included). Updates run
   weekly. Don't start extra data updates, add full indexes on `trees`, or add rebuild triggers
   without telling the owner what it will cost.
+- Never write a figure from the data into code or page text: show it from the build (`/api/meta`, the
+  database, `meta.method` for the method's limits). Date any figure quoted in the docs.
+- Record the reasoning behind any choice someone might later question in `docs/DECISIONS.md`.
 - Keep the repository free of secrets and account-specific setup details.

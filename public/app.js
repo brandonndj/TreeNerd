@@ -185,6 +185,7 @@ map.on("load", async () => {
 
   const meta = await api("/api/meta").catch(() => null);
   state.meta = meta;
+  Object.assign(METHOD, meta?.method || {});
   const v = encodeURIComponent(meta?.built_at || "dev");
   // Tiles are served one by one by the Worker (no HTTP Range requests, which some corporate proxies break).
   map.addSource("trees", { type: "vector", url: `${location.origin}/tiles/trees.json?v=${v}`, promoteId: "id" });
@@ -508,7 +509,7 @@ function choose(r) {
   if (r.kind === "top") { q.blur(); return r.top === "changes" ? openChanges() : openTop(r.top, r.by); }
   q.value = r.name; $("#clear").hidden = false; q.blur();
   if (r.kind === "address") nearby(r.lat, r.lng, 150, { title: r.name, sub: r.address });
-  else if (r.kind === "mrt") nearby(r.lat, r.lng, 250, { title: r.name, sub: "Station" });
+  else if (r.kind === "mrt") nearby(r.lat, r.lng, METHOD.station_radius_m, { title: r.name, sub: "Station" });
   else if (r.kind === "species") openSpecies(r.slug);
   else openPlace(r.kind, r.slug, r.bbox);
 }
@@ -687,7 +688,7 @@ function renderPlace(d) {
     <h2>${esc(d.name)}</h2>
     <p class="sub">${esc(sub)}${d.alt?.length ? ` · ${esc(d.alt.join(" · "))}` : ""}</p>
     <div class="stats">
-      ${statTile(fmt.format(d.tree_count), d.kind === "trail" ? "trees within 15 m" : "trees")}
+      ${statTile(fmt.format(d.tree_count), d.kind === "trail" ? `trees within ${M("trail_max_m")} m` : "trees")}
       ${statTile(fmt.format(d.species_count), "species")}
       ${statTile(`${nativePct}%`, `of trees are native species${unknownPct ? ` · ${unknownPct}% unknown origin` : ""}`)}
       ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
@@ -696,7 +697,7 @@ function renderPlace(d) {
     </div>
     ${residentsNote(extra)}
     ${d.kind === "park" ? WEATHER_SLOT : ""}
-    ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within 15 m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
+    ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within ${M("trail_max_m")} m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
     ${extra.story ? `<h3>About this road</h3><p>${esc(extra.story)}</p><p class="note">From the ${esc(extra.story_source || "National Library Board")}.</p>` : ""}
 
     ${d.heritage_count ? `<div class="callout">🌟 ${d.heritage_count} heritage tree${d.heritage_count > 1 ? "s" : ""}</div>` : ""}
@@ -928,9 +929,9 @@ async function nearby(lat, lng, r = 150, label = null) {
 // ---- points of interest in panels
 function residentsNote(extra) {
   if (extra.trees_per_1000_residents != null) {
-    return `<p class="note">Per resident: ${fmt.format(extra.residents)} residents in the 2020 census. Workers, students and visitors aren't counted, so business and industrial areas score high.</p>`;
+    return `<p class="note">Per resident: ${fmt.format(extra.residents)} residents in the ${extra.residents_year || METHOD.residents_year} census. Workers, students and visitors aren't counted, so business and industrial areas score high.</p>`;
   }
-  if (extra.residents) return `<p class="note">Only ${fmt.format(extra.residents)} residents in the 2020 census, too few for a per-resident figure.</p>`;
+  if (extra.residents) return `<p class="note">Only ${fmt.format(extra.residents)} residents in the ${extra.residents_year || METHOD.residents_year} census, too few for a per-resident figure.</p>`;
   return "";
 }
 /** Counts by type, then heritage sites and hawker centres by name (amenities are on the map). */
@@ -956,6 +957,11 @@ function wirePoiRows(rows) {
     poiPopup(f);
   }));
 }
+
+// ---- the method's limits, as the live build used them (meta.method); defaults are for builds older than that
+const METHOD_DEFAULTS = { road_max_m: 30, trail_max_m: 15, station_radius_m: 250, carbon_max_diameter_cm: 212, min_residents: 1000, residents_year: 2020 };
+const METHOD = { ...METHOD_DEFAULTS };
+const M = (k) => fmt.format(METHOD[k]);
 
 // ---- live air temperature (NEA): the nearest station's reading, said plainly as such
 /**
@@ -1079,6 +1085,7 @@ async function openTop(kind = "road", by = "trees") {
   try { d = await api(`/api/top?kind=${kind}${kind === "tree" ? "" : `&by=${by}`}`); }
   catch (e) { return seq === navSeq && openPanel(`<h2>Rankings</h2><p class="muted">${esc(e.message)}</p>`); }
   if (seq !== navSeq) return;
+  const n = (kind === "tree" ? d.trees : d.places).length; // how many are listed, not how many were asked for
   state.place = state.species = null;
   setHighlight(null); selectPoint(null); clearOverlays();
   setUrl({ top: kind === "tree" ? "tree" : `${kind}:${by}` });
@@ -1091,9 +1098,9 @@ async function openTop(kind = "road", by = "trees") {
   openPanel(`
     <h2>${kind === "tree" ? "Widest tree trunks" : `${esc(TOP_KINDS.find(([k]) => k === kind)[1])}: ${esc(TOP_BYS.find(([b]) => b === by)[1].toLowerCase())}`}</h2>
     <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump."
-      : by === "carbon" ? "Top 25 in Singapore, by estimated carbon"
-      : by === "per_resident" ? "Top 25, trees per 1,000 residents (2020 census). Areas with under 1,000 residents are left out."
-      : by === "per_km" ? "Top 25, trees within 15 m per km of route" : "Top 25 in Singapore"}</p>
+      : by === "carbon" ? `Top ${n} in Singapore, by estimated carbon`
+      : by === "per_resident" ? `Top ${n}, trees per 1,000 residents (${METHOD.residents_year} census). Areas with under ${M("min_residents")} residents are left out.`
+      : by === "per_km" ? `Top ${n}, trees within ${M("trail_max_m")} m per km of route` : `Top ${n} in Singapore`}</p>
     ${chips(topKinds(), kind, "kind")}
     ${kind === "tree" ? "" : chips(bysFor(kind), by, "by")}
     ${(kind === "tree" ? d.trees : d.places).length ? "" : `<p class="muted">Nothing to rank yet.</p>`}
@@ -1119,7 +1126,7 @@ $("#about").addEventListener("click", () => {
   openPanel(`
     <h2>About TreeNerd</h2>
     <div class="prose">
-      <p>Explore Singapore's ${m.tree_count ? fmt.format(m.tree_count) : "~890,000"} trees by road, park, area, address or species.</p>
+      <p>Explore ${m.tree_count ? `Singapore's ${fmt.format(m.tree_count)} trees` : "every tree in Singapore"} by road, park, area, address or species.</p>
       <h3>Data</h3>
       <ul>
         <li>Trees: <a href="https://treessg.nparks.gov.sg" target="_blank" rel="noopener noreferrer">Trees.sg</a> © National Parks Board${m.source_last_edit ? `, last changed ${esc(fmtDate(m.source_last_edit))}` : ""}</li>
@@ -1128,18 +1135,18 @@ $("#about").addEventListener("click", () => {
         <li>Basemap and address search: <a href="https://www.onemap.gov.sg" target="_blank" rel="noopener noreferrer">OneMap</a> © Singapore Land Authority</li>
         <li>Missing species families and origins: <a href="https://powo.science.kew.org/about-wcvp" target="_blank" rel="noopener noreferrer">World Checklist of Vascular Plants</a>, Royal Botanic Gardens, Kew (CC BY 4.0)</li>
         <li>Trails: NParks park connector routes; cycling paths: Land Transport Authority, via data.gov.sg</li>
-        <li>Park amenities: NParks. Hawker centres and live air temperature: National Environment Agency. Historic sites and national monuments: National Heritage Board. Road descriptions: National Library Board. Residents: Census of Population 2020, Department of Statistics. All via data.gov.sg (Singapore Open Data Licence).</li>
+        <li>Park amenities: NParks. Hawker centres and live air temperature: National Environment Agency. Historic sites and national monuments: National Heritage Board. Road descriptions: National Library Board. Residents: Census of Population ${METHOD.residents_year}, Department of Statistics. All via data.gov.sg (Singapore Open Data Licence).</li>
         <li>Wood density: <a href="https://doi.org/10.5281/zenodo.16919509" target="_blank" rel="noopener noreferrer">Global Wood Density Database v.2</a>, Fischer et al. 2026 (CC BY 4.0)</li>
         <li>MRT and LRT stations: Land Transport Authority, via data.gov.sg</li>
       </ul>
       ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. ${state.stale ? "An update is overdue, so recent changes by NParks aren't shown yet." : "It refreshes every week."}</p>` : ""}
       <h3>How it's worked out</h3>
       <ul>
-        <li><b>Roads</b> are matched to the nearest named road within 30 m. A park tree that close to a road counts for both, so it appears on the road's page and the park's.</li>
-        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than 2.1 m across, which the model doesn't cover.</li>
+        <li><b>Roads</b> are matched to the nearest named road within ${M("road_max_m")} m. A park tree that close to a road counts for both, so it appears on the road's page and the park's.</li>
+        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than ${(METHOD.carbon_max_diameter_cm / 100).toFixed(1)} m across, which the model doesn't cover.</li>
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
-        <li><b>Trails</b> count the trees NParks records within 15 m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
-        <li><b>Trees per resident</b> uses the 2020 census, which counts residents only. Areas with under 1,000 residents get no figure.</li>
+        <li><b>Trails</b> count the trees NParks records within ${M("trail_max_m")} m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
+        <li><b>Trees per resident</b> uses the ${METHOD.residents_year} census, which counts residents only. Areas with under ${M("min_residents")} residents get no figure.</li>
         <li><b>Weather</b> comes live from NEA, and each reading names where it's from. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>

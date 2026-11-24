@@ -25,6 +25,8 @@ from, or labelled as an estimate, or absent. Never a guess presented as a fact.
 - **Label estimates and their inputs** (for example, the wood density used and where it came from).
 - **Filled-in data needs a measured accuracy bar**, checked on every build against values that are
   known. Below the bar, the field isn't filled.
+- **No figure is written by hand.** Counts and the method's limits come from the build that's live, so
+  they can't go out of date when the data changes. Figures quoted in docs are dated.
 - **Old data is labelled as old.** If an update is overdue, the site says so.
 
 **Enforced by**

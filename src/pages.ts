@@ -1,6 +1,6 @@
 // HTML page metadata (titles, descriptions, link previews) and sitemap.xml.
 const SITE = "https://treenerd.fyi";
-const DEFAULT_DESC = "Explore every one of Singapore's ~890,000 trees. Search by road, park, area, postal code or species.";
+const DEFAULT_DESC = "Explore every tree in Singapore. Search by road, park, area, postal code or species.";
 
 // Must match public/_headers (static assets get theirs from that file).
 export const PAGE_HEADERS: Record<string, string> = {

@@ -18,7 +18,12 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - Park amenities, hawker centres and heritage sites are now hollow rings on the map, each kind in its own colour, so they no longer look like tree dots.
 - Trails and the selected-tree ring are now dark blue (white in dark mode), apart from every tree colour.
 
+### Fixed
+- Rankings say how many places they list ("Top 12") instead of always "Top 25", which was wrong when fewer qualified.
+- The About panel's explanations (how far a tree can be from a road or trail, the census year, the carbon limit) now come from the latest data update, so they can't fall out of step with it.
+
 ### Internal
+- Each build publishes its method limits in `meta.method`; the app reads them, falling back to the pipeline's defaults for older builds (`tests/test_method.py` keeps the two in step). The fixed tree count is gone from page descriptions. The build logs park facility classes it doesn't show, so new ones are noticed. Reasons for design and data choices are now in `docs/DECISIONS.md`.
 - `/api/weather` keeps `reading` (air temperature) as before and adds `heat`, `forecast`, `rain`, `lightning`, `uv` and `air`, each null without a fresh reading; one failing feed doesn't hide the others. Its replies are no longer kept stale in browsers. Parsing is in `src/weather.ts`, tested against NEA responses saved on 24 Nov.
 - `tests/test_colours.py` reads the colours from `public/app.css` and `public/app.js`, simulates protanopia, deuteranopia and tritanopia (Machado et al. 2009) and fails if any two colours that carry meaning come within CIEDE2000 ΔE 15 of each other. `tools/colours.py` prints a report.
 

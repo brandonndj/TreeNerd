@@ -212,6 +212,34 @@ test("on data built before trails existed, nothing offers trails or per-resident
   await top.ctx.close();
 });
 
+test("explanations follow the build's own limits, and rankings say how many are listed", async () => {
+  const changed = (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json();
+    m.method = { ...m.method, road_max_m: 25, trail_max_m: 20, min_residents: 2000, residents_year: 2030, carbon_max_diameter_cm: 180 };
+    await r.fulfill({ response: res, json: m });
+  });
+  const { ctx, page, errors } = await open("/", undefined, B, changed);
+  await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  await page.click("#about");
+  const about = (await page.textContent("#panel-body")).replace(/\s+/g, " ");
+  for (const re of [/nearest named road within 25 m/, /within 20 m of the route/, /wider than 1\.8 m across/,
+    /uses the 2030 census, which counts residents only\. Areas with under 2,000 residents/, /Census of Population 2030/]) assert.match(about, re);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // an older build without meta.method: the pipeline's own limits (checked by tests/test_method.py)
+  const old = await open("/", undefined, B, (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json(); delete m.method; await r.fulfill({ response: res, json: m }); }));
+  await old.page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  await old.page.click("#about");
+  assert.match(await old.page.textContent("#panel-body"), /nearest named road within 30 m/);
+  await old.ctx.close();
+  const top = await open("/?top=road:trees");
+  await panelTitle(top.page, "Roads: most trees");
+  const listed = await top.page.locator(".ranked li").count();
+  assert.match(await top.page.textContent("#panel-body .sub"), new RegExp(`^Top ${listed} in Singapore`));
+  await top.ctx.close();
+});
+
 // Every live reading at once, the most the weather card ever shows (src/weather.ts gives each of these)
 const FULL_WEATHER = (at = new Date(Date.now() - 5 * 60_000).toISOString()) => ({
   reading: { celsius: 31.46, station: "Somerset Road", dist_m: 1234, at },

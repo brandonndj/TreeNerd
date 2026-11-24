@@ -2,11 +2,13 @@
 
 **[treenerd.fyi](https://treenerd.fyi)**: explore every tree in Singapore.
 
-TreeNerd maps Singapore's ~890,000 trees and makes them searchable by **road**, **park**, **planning area**, **subzone**, **park connector**, **constituency**, **MRT station**, **address** or **species**. Pick a place to see how many trees it has, which species dominate, how much carbon they store, and its largest trees. Pick any tree to see its details.
+TreeNerd maps every tree NParks records in Singapore (889,678 at the 22 November 2026 update) and makes them searchable by **road**, **park**, **planning area**, **subzone**, **park connector**, **constituency**, **MRT station**, **address** or **species**. Pick a place to see how many trees it has, which species dominate, how much carbon they store, and its largest trees. Pick any tree to see its details.
 
 ![TreeNerd showing the trees of Orchard Road](docs/screenshot.jpg)
 
 ## Principles
+
+Why things are done the way they are, from the weather readings chosen to the map colours, is recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 Every build must meet three requirements, in this order: **accuracy**, a good **iPhone and iPad experience**, and **reliability**. They're defined, with the checks that enforce them, in [PRINCIPLES.md](PRINCIPLES.md).
 
@@ -106,6 +108,8 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 
 ## Methodology
 
+Percentages below are from the 22 November 2026 update and move a little each week. The site never shows them from this file: every figure visitors see is computed by the build, checked by `pipeline/audit.py`, and published with it (`/api/meta` has the current totals; the method's limits are in `meta.method`, which the About panel reads).
+
 - **Roads are derived, not supplied.** The source data has no street field. Each tree is assigned to the nearest named road within 30 m, with main roads preferred over walkways and driveways. About 83% of trees are matched to a road; just over half of the rest are in parks. A park tree within 30 m of a named road counts for both the road and the park (about 29% of park trees).
 - **Areas** (subzones, planning areas, parks, constituencies, conservation areas) are assigned by point-in-polygon.
 - **Carbon is an estimate.** It uses a standard pantropical allometric model (Chave et al., 2014) on girth, height band and wood density, with 47% of biomass counted as carbon. Treat it as indicative.
@@ -120,7 +124,7 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
   - **Origin** is only ever filled as *non-native*, and only when the plant's entire native range is outside Asia. Being native to the region doesn't make a plant native to Singapore, so "native" is never inferred; those species stay unknown.
   - **Accuracy is checked on every update** by hiding NParks' own answers and comparing. In testing, family matched 99.8% (the rest were renamed families, such as Cordiaceae → Boraginaceae) and origin matched 100%. If a check falls below its bar, that field isn't filled.
   - The app labels every value that came from Kew.
-- **Implausible measurements** are flagged, not hidden. A tree is flagged when its recorded girth and height can't both be right: a trunk wider than 0.3× the tree's height. About 20 trees in 875,000 are flagged. Figs (aerial roots), palms, pandans and bamboo are exempt, because they're measured around a whole clump. Flagged trees show a warning and no carbon estimate.
+- **Implausible measurements** are flagged, not hidden. A tree is flagged when its recorded girth and height can't both be right: a trunk wider than 0.3× the tree's height. About 20 trees in the whole inventory are flagged. Figs (aerial roots), palms, pandans and bamboo are exempt, because they're measured around a whole clump. Flagged trees show a warning and no carbon estimate.
 - **Recent changes** come from comparing each update with the one before it, by NParks' tree ID.
   - A tree that's no longer listed isn't always felled: it may have been re-recorded under a new ID.
   - If more than 5% of trees appear or disappear in one update, it's treated as a data problem and nothing is logged.
