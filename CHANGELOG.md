@@ -2,7 +2,16 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
-## 2026-11-24: Colours for colour-blind visitors
+## 2026-11-24: Weather now, and colours for colour-blind visitors
+
+### Added
+- The temperature card is now a weather card with live NEA readings, each showing where it's from and when:
+  - Heat stress at the nearest station, with NEA's rating (low, moderate or high).
+  - The 2-hour forecast for the area.
+  - Rain at the nearest rain gauge, shown while it's raining there.
+  - Lightning, shown when NEA records a strike within 10 km in the last 15 minutes.
+  - The UV index (measured at Changi, one reading for Singapore), in the daytime.
+  - Air quality: the latest 1-hour PM2.5 reading for the nearest NEA region (north, south, east, west or central), with NEA's band and its advice when the air isn't normal.
 
 ### Changed
 - New map colours that stay easy to tell apart with red-green colour blindness (and blue-yellow too), in light and dark mode. Before, botanic-garden and conservation-area trees looked almost the same to some people, as did native and non-native species.
@@ -10,6 +19,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - Trails and the selected-tree ring are now dark blue (white in dark mode), apart from every tree colour.
 
 ### Internal
+- `/api/weather` keeps `reading` (air temperature) as before and adds `heat`, `forecast`, `rain`, `lightning`, `uv` and `air`, each null without a fresh reading; one failing feed doesn't hide the others. Its replies are no longer kept stale in browsers. Parsing is in `src/weather.ts`, tested against NEA responses saved on 24 Nov.
 - `tests/test_colours.py` reads the colours from `public/app.css` and `public/app.js`, simulates protanopia, deuteranopia and tritanopia (Machado et al. 2009) and fails if any two colours that carry meaning come within CIEDE2000 ΔE 15 of each other. `tools/colours.py` prints a report.
 
 ## 2026-11-23: Temperature card, and corrections

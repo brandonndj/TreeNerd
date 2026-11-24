@@ -966,29 +966,45 @@ function wirePoiRows(rows) {
  */
 const TEMP_BANDS = [[33, "very-hot"], [31, "hot"], [29, "warm"], [26, "mild"], [-Infinity, "cool"]];
 const tempBand = (c) => TEMP_BANDS.find(([min]) => c >= min)[1];
-const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Air temperature" hidden></div>`;
-/** Fill the temperature card once a fresh reading arrives; it stays hidden otherwise. */
+const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Weather now" hidden></div>`;
+const hm = (at) => new Date(at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
+const hour = (at) => new Date(at).toLocaleTimeString("en-SG", { hour: "numeric" });
+const away = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`);
+const wxRow = (k, v, where, cls = "") => `<li class="wx-row ${cls}"><span class="wx-k">${k}</span><span class="wx-v">${v}<span class="wx-src">${where}</span></span></li>`;
+/** Fill the weather card with whatever NEA has fresh readings for (the Worker drops stale ones); hidden if none. */
 async function showWeather(lat, lng) {
   if (!$("#weather")) return;
   let d;
   try { d = await api(`/api/weather?lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`); } catch { return; }
-  const w = d.reading, el = $("#weather");
-  if (!w || !el) return;
-  const c = Number(w.celsius);
-  const km = w.dist_m >= 1000 ? `${(w.dist_m / 1000).toFixed(1)} km` : `${w.dist_m} m`;
-  const time = new Date(w.at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
-  el.dataset.band = tempBand(c);
-  el.innerHTML = `
+  const el = $("#weather");
+  if (!el || !d) return;
+  const w = d.reading, rows = [];
+  if (d.lightning) {
+    const l = d.lightning, more = l.count > 1 ? `, ${l.count} strikes within 10 km` : "";
+    rows.push(wxRow("⚡ Lightning", `<b>${away(l.dist_m)} away</b>`, `${esc(hm(l.at))}${l.kind ? ` · ${esc(l.kind.toLowerCase())}` : ""}${more}`, "wx-alert"));
+  }
+  if (d.rain) rows.push(wxRow("Raining now", `<b>${Number(d.rain.mm)} mm</b> in 5 min`, `${esc(d.rain.station)} rain gauge, ${away(d.rain.dist_m)} · ${esc(hm(d.rain.at))}`));
+  if (d.forecast) rows.push(wxRow("Next 2 hours", `<b>${esc(d.forecast.text)}</b>`, `${esc(d.forecast.area)} area, until ${esc(hm(d.forecast.until))}`));
+  if (d.heat) rows.push(wxRow("Heat stress", `<b>${esc(d.heat.level)}</b> (WBGT ${Number(d.heat.wbgt).toFixed(1)} °C)`, `${esc(d.heat.station)}, ${away(d.heat.dist_m)} · ${esc(hm(d.heat.at))}`));
+  if (d.uv) rows.push(wxRow("UV index", `<b>${Number(d.uv.index)} ${esc(d.uv.level.toLowerCase())}</b>`, `measured at Changi · ${esc(hour(d.uv.at))}`));
+  if (d.air) {
+    const a = d.air;
+    rows.push(wxRow("Air (PM2.5)", `<b>${Number(a.pm25)} µg/m³ ${esc(a.band.toLowerCase())}</b>`, `NEA ${esc(a.region)} region · ${esc(hour(a.at))}`));
+    if (a.advice) rows.push(`<li class="wx-advice"><span></span><span>${esc(a.advice)} <span class="muted">(NEA)</span></span></li>`);
+  }
+  if (!w && !rows.length) return;
+  el.dataset.band = w ? tempBand(Number(w.celsius)) : "none";
+  el.innerHTML = (w ? `
     <div class="weather-main">
       <svg class="weather-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7" stroke-width="2.6"/></svg>
-      <div class="weather-reading"><span class="weather-temp">${c.toFixed(1)}<span class="weather-unit">°C</span></span></div>
+      <div class="weather-reading"><span class="weather-temp">${Number(w.celsius).toFixed(1)}<span class="weather-unit">°C</span></span></div>
     </div>
     <div class="weather-where">
       <span>${esc(w.station)} station</span>
-      <span class="muted">${km} away · ${esc(time)}</span>
-    </div>
-    <p class="weather-note">Latest reading from the nearest NEA weather station. It isn't a measure of how much the trees cool this spot.</p>`;
+      <span class="muted">${away(w.dist_m)} away · ${esc(hm(w.at))}</span>
+    </div>` : "") + (rows.length ? `<ul class="wx-rows">${rows.join("")}</ul>` : "") + `
+    <p class="weather-note">Latest readings from NEA, each from the station, area or region named. They aren't a measure of how much the trees cool this spot.</p>`;
   el.hidden = false;
 }
 
@@ -1124,7 +1140,7 @@ $("#about").addEventListener("click", () => {
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
         <li><b>Trails</b> count the trees NParks records within 15 m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
         <li><b>Trees per resident</b> uses the 2020 census, which counts residents only. Areas with under 1,000 residents get no figure.</li>
-        <li><b>Air temperature</b> is the latest reading at the nearest NEA weather station, shown with the station's name and distance. It isn't a measure of how much trees cool a place.</li>
+        <li><b>Weather</b> comes live from NEA, and each reading names where it's from. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>

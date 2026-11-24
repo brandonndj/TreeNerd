@@ -9,6 +9,7 @@
 import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
 import { serveTiles } from "./tiles";
+import { FEEDS, type Feed, air, forecast, heat, lightning, rain, temperature, uv } from "./weather";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
@@ -465,44 +466,53 @@ async function apiTop(url: URL, env: Env) {
   return json({ kind, by, places: results }, 200, 21600);
 }
 
-// ---------------------------------------------------------------- live air temperature (NEA)
-const AIR_TEMP = "https://api-open.data.gov.sg/v2/real-time/api/air-temperature";
-interface NeaStation { id: string; name: string; location?: { latitude: number; longitude: number } }
-interface NeaReading { timestamp: string; data: { stationId: string; value: number }[] }
-
-/**
- * The latest air temperature at the NEA weather station nearest a point. One upstream request per
- * two minutes at most, whoever asks (edge-cached). Readings older than 30 minutes are not shown.
- */
-async function apiWeather(url: URL, ctx: ExecutionContext) {
-  const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
-  if (!(lat > 1.1 && lat < 1.5 && lng > 103.5 && lng < 104.2)) throw new HttpError(400, "location must be in Singapore");
-  const cache = caches.default, key = new Request(AIR_TEMP);
+// ---------------------------------------------------------------- live conditions (NEA)
+/** One NEA feed, from the edge cache (two minutes) or upstream; null if NEA can't be reached. */
+async function neaFeed(feed: Feed, ctx: ExecutionContext): Promise<unknown> {
+  const cache = caches.default, key = new Request(FEEDS[feed]);
   let res = await cache.match(key);
   if (!res) {
     try {
-      const up = await fetch(AIR_TEMP, { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
+      const up = await fetch(FEEDS[feed], { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
       if (!up.ok) throw new Error(`NEA returned ${up.status}`);
       res = new Response(await up.text(), { headers: { "content-type": "application/json", "cache-control": "public, max-age=120" } });
       ctx.waitUntil(cache.put(key, res.clone()));
     } catch (e) {
-      console.error("air temperature unavailable:", String(e));
-      return json({ reading: null }, 200, 60);
+      console.error(`NEA ${feed} unavailable:`, String(e));
+      return null;
     }
   }
-  const d = (await res.json<{ data?: { stations?: NeaStation[]; readings?: NeaReading[] } }>()).data;
-  const latest = d?.readings?.[0];
-  const values = new Map((latest?.data ?? []).map((r) => [r.stationId, r.value]));
-  const nearest = (d?.stations ?? [])
-    .filter((s) => s.location && values.has(s.id) && Number.isFinite(values.get(s.id)))
-    .map((s) => ({ s, dist_m: Math.round(haversine(lat, lng, s.location!.latitude, s.location!.longitude)) }))
-    .sort((a, b) => a.dist_m - b.dist_m)[0];
-  const at = latest ? Date.parse(latest.timestamp) : NaN;
-  if (!nearest || !Number.isFinite(at) || Date.now() - at > 30 * 60_000) return json({ reading: null }, 200, 60);
-  return json({
-    reading: { celsius: values.get(nearest.s.id), station: nearest.s.name, dist_m: nearest.dist_m, at: latest!.timestamp },
+  try { return await res.json(); } catch { return null; }
+}
+
+/**
+ * Live conditions near a point: air temperature (`reading`, unchanged for older pages), heat stress,
+ * the 2-hour forecast, rain now, lightning, UV and PM2.5 (see src/weather.ts). Each is null when NEA
+ * has no fresh reading; one failing feed never hides the others. At most one upstream request per
+ * feed every two minutes, whoever asks.
+ */
+async function apiWeather(url: URL, ctx: ExecutionContext) {
+  const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
+  if (!(lat > 1.1 && lat < 1.5 && lng > 103.5 && lng < 104.2)) throw new HttpError(400, "location must be in Singapore");
+  const names = Object.keys(FEEDS) as Feed[];
+  const feeds = Object.fromEntries(names.map((f, i) => [f, i])) as Record<Feed, number>;
+  const got = await Promise.all(names.map((f) => neaFeed(f, ctx)));
+  const now = Date.now(), d = (f: Feed) => got[feeds[f]];
+  const safe = <T>(fn: () => T) => { try { return fn(); } catch (e) { console.error("NEA parse:", String(e)); return null; } };
+  const body = {
+    reading: safe(() => temperature(d("temperature"), lat, lng, now)),
+    heat: safe(() => heat(d("heat"), lat, lng, now)),
+    forecast: safe(() => forecast(d("forecast"), lat, lng, now)),
+    rain: safe(() => rain(d("rain"), lat, lng, now)),
+    lightning: safe(() => lightning(d("lightning"), lat, lng, now)),
+    uv: safe(() => uv(d("uv"), now)),
+    air: safe(() => air(d("air"), lat, lng, now)),
     source: "National Environment Agency, via data.gov.sg",
-  }, 200, 60);
+  };
+  // live readings: no stale copies in browsers (json() would allow a day of stale-while-revalidate)
+  const res = json(body, 200, 60);
+  res.headers.set("cache-control", "public, max-age=60");
+  return res;
 }
 
 // ---------------------------------------------------------------- address search (OneMap)

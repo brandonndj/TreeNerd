@@ -212,6 +212,50 @@ test("on data built before trails existed, nothing offers trails or per-resident
   await top.ctx.close();
 });
 
+// Every live reading at once, the most the weather card ever shows (src/weather.ts gives each of these)
+const FULL_WEATHER = (at = new Date(Date.now() - 5 * 60_000).toISOString()) => ({
+  reading: { celsius: 31.46, station: "Somerset Road", dist_m: 1234, at },
+  heat: { level: "Moderate", wbgt: 31.2, station: "Hong Lim Park", dist_m: 2345, at },
+  forecast: { area: "Tanglin", text: "Thundery Showers", from: at, until: new Date(Date.now() + 90 * 60_000).toISOString() },
+  rain: { mm: 0.4, station: "Orchard Road Exchange Building", dist_m: 640, at },
+  lightning: { dist_m: 3456, at, kind: "Cloud to Ground", count: 4 },
+  uv: { index: 9, level: "Very high", at },
+  air: { pm25: 72, band: "Elevated", advice: "Healthy people: reduce strenuous outdoor activities for the next hour. Vulnerable people: avoid them.", region: "central", at },
+  source: "National Environment Agency, via data.gov.sg",
+});
+const fullWeather = (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: FULL_WEATHER() }));
+
+test("weather card: every reading names where it's from, lightning first, nothing sticks out", async () => {
+  for (const device of ["iPhone SE", "iPhone 15 Pro", "iPad Mini"]) {
+    const { ctx, page, errors } = await open("/?near=1.2994,103.8455,250", { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
+    await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+    const card = await page.evaluate(() => {
+      const el = document.querySelector("#weather"), r = el.getBoundingClientRect();
+      const t = (e) => (e?.textContent || "").replace(/\s+/g, " ").trim();
+      const rows = [...el.querySelectorAll(".wx-rows > li")].map((li) => { // "label value · where it's from"
+        const src = li.querySelector(".wx-src"), v = li.querySelector(".wx-v");
+        return src ? `${t(li.querySelector(".wx-k"))} ${t(v).slice(0, t(v).length - t(src).length).trim()} · ${t(src)}` : t(li);
+      });
+      const sticksOut = [...el.querySelectorAll("*")].filter((e) => { const b = e.getBoundingClientRect(); return b.width && (b.left < r.left - 0.5 || b.right > r.right + 0.5); }).length;
+      return { rows, sticksOut, fits: r.left >= 0 && r.right <= innerWidth, wide: el.scrollWidth > el.clientWidth + 1 };
+    });
+    assert.ok(card.fits && !card.wide && card.sticksOut === 0, `${device}: ${JSON.stringify(card)}`);
+    assert.match(card.rows[0], /Lightning 3\.5 km away .*cloud to ground, 4 strikes within 10 km/);
+    const all = card.rows.join(" | ");
+    for (const re of [/Raining now 0\.4 mm in 5 min · Orchard Road Exchange Building rain gauge, 640 m/, /Next 2 hours Thundery Showers · Tanglin area, until/,
+      /Heat stress Moderate \(WBGT 31\.2 °C\) · Hong Lim Park, 2\.3 km/, /UV index 9 very high · measured at Changi/,
+      /Air \(PM2\.5\) 72 µg\/m³ elevated · NEA central region/, /reduce strenuous outdoor activities for the next hour.*\(NEA\)/]) assert.match(all, re, device);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // without a temperature the other readings still show; the old reply (temperature only) still works
+  const t = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: { ...FULL_WEATHER(), reading: null } })));
+  await t.page.waitForSelector("#weather:not([hidden]) .wx-rows");
+  assert.equal(await t.page.$(".weather-temp"), null);
+  assert.equal(await t.page.getAttribute("#weather", "data-band"), "none");
+  await t.ctx.close();
+});
+
 test("temperature card: shown near the top with station and distance, hidden without a fresh reading", async () => {
   const at = new Date(Date.now() - 5 * 60_000).toISOString();
   const reading = (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: {
@@ -229,7 +273,7 @@ test("temperature card: shown near the top with station and distance, hidden wit
     assert.doesNotMatch(card.text, /Air temperature now/); // the time of the reading says when
     assert.match(card.text, /Somerset Road station/);
     assert.match(card.text, /1\.2 km away/);
-    assert.match(card.text, /isn't a measure of how much the trees cool/);
+    assert.match(card.text, /aren't a measure of how much the trees cool/);
     assert.equal(card.band, "hot");
     assert.ok(card.below && card.fits && card.tempSize >= 28, JSON.stringify(card));
     assert.deepEqual(errors, []);
@@ -393,8 +437,10 @@ for (const [label, device] of IOS) {
   test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {
     for (const path of IOS_VIEWS) {
       // layout is measured in points, so render at 1x: software rendering at an iPad's 2x is very slow
-      const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 });
+      // the weather card at its fullest, so its rows are measured too
+      const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
       if (path !== "/") await page.waitForSelector("#panel-body h2");
+      if (path.startsWith("/?near")) await page.waitForSelector("#weather:not([hidden]) .wx-rows");
       else { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
       const report = await page.evaluate(() => {
         const shown = (e) => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);

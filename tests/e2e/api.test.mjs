@@ -145,13 +145,21 @@ test("points of interest: nearby, sorted, labelled by source", async () => {
   assert.equal((await getJson("/api/place/road/orchard-road")).pois, null, "roads have no amenity list");
 });
 
-test("air temperature: nearest station or nothing, never a guess", async () => {
+test("weather: nearest reading or nothing, never a guess or a stale copy", async () => {
   assert.equal((await get("/api/weather?lat=48.85&lng=2.35")).status, 400);
   const w = await getJson("/api/weather?lat=1.299&lng=103.846");
   if (w.reading) { // the test machine may not reach NEA; when it does, the reading must be complete
     assert.ok(Number.isFinite(w.reading.celsius) && w.reading.station && w.reading.dist_m >= 0);
     assert.ok(Date.now() - Date.parse(w.reading.at) < 30 * 60_000);
   } else assert.equal(w.reading, null);
+  // every live field is present (null when NEA has nothing fresh), and the reply is never kept stale
+  for (const k of ["heat", "forecast", "rain", "lightning", "uv", "air"]) assert.ok(k in w, k);
+  if (w.heat) assert.ok(["Low", "Moderate", "High"].includes(w.heat.level) && Date.now() - Date.parse(w.heat.at) < 45 * 60_000);
+  if (w.forecast) assert.ok(Date.parse(w.forecast.until) > Date.now() && w.forecast.area);
+  if (w.rain) assert.ok(w.rain.mm > 0 && w.rain.station);
+  if (w.lightning) assert.ok(w.lightning.dist_m <= 10_000);
+  if (w.air) assert.ok(["Normal", "Elevated", "High", "Very high"].includes(w.air.band) && w.air.region);
+  assert.equal((await get("/api/weather?lat=1.299&lng=103.846")).headers.get("cache-control"), "public, max-age=60");
 });
 
 test("tiles: TileJSON, a tile with trees, an empty tile, a bad address", async () => {
