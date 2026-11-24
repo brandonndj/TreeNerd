@@ -207,14 +207,12 @@ map.on("load", async () => {
     paint: { "line-color": TRAIL_COLOR(), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 13, 5, 17, 9] } }, "trees");
   // amenities, hawker centres and heritage sites for the open park, area or "near" circle
   map.addSource("pois", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  map.addLayer({ id: "pois", type: "circle", source: "pois", paint: {
-    "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 17, 8],
-    "circle-color": ["match", ["get", "kind"], "heritage", POI_COLOR.heritage, "hawker", POI_COLOR.hawker, POI_COLOR.amenity],
-    "circle-stroke-width": 2, "circle-stroke-color": dark() ? "#0f1411" : "#ffffff" } });
+  // amenities, hawker centres and heritage sites are rings (a hollow centre), so they never read as tree dots
+  map.addLayer({ id: "pois", type: "circle", source: "pois", paint: poiPaint() });
   map.addSource("sel", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 8, 18, 18], "circle-color": "transparent",
-    "circle-stroke-width": 3, "circle-stroke-color": css("--accent") } });
+    "circle-stroke-width": 3, "circle-stroke-color": css("--c-ink") } }); // neutral: visible around any tree colour
   map.addSource("near", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "near", type: "line", source: "near", paint: { "line-color": css("--accent"), "line-width": 2, "line-dasharray": [2, 2] } });
   buildLegend();
@@ -224,8 +222,20 @@ map.on("load", async () => {
 });
 
 // ---- overlays: a trail's line and points of interest
-const TRAIL_COLOR = () => (dark() ? "#ffd43b" : "#d9480f"); // not a colour the basemap or tree types use
-const POI_COLOR = { heritage: "#9c36b5", hawker: "#e8590c", amenity: "#1971c2" };
+function poiPaint() {
+  return {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 17, 8],
+    "circle-color": dark() ? "#0f1411" : "#ffffff",
+    "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 12, 2.5, 17, 4],
+    "circle-stroke-color": ["match", ["get", "kind"], "heritage", poiColor("heritage"), "hawker", poiColor("hawker"), poiColor("amenity")],
+  };
+}
+// Overlays are told apart from tree dots by form, not only colour: the trail is a bold neutral line,
+// points of interest are rings. Their colours are checked for colour blindness in tests/test_colours.py.
+const TRAIL_COLOR = () => css("--c-ink");
+const POI_COLORS = { light: { heritage: "#71142b", hawker: "#f29e0d", amenity: "#0b3d91" },
+  dark: { heritage: "#dd4077", hawker: "#f5f247", amenity: "#a5d8ff" } };
+const poiColor = (kind) => POI_COLORS[dark() ? "dark" : "light"][kind] || POI_COLORS.light.amenity;
 const POI_ICON = { heritage: "🏛", hawker: "🍜", amenity: "📍" };
 const EMPTY = { type: "FeatureCollection", features: [] };
 let trailShapes = null;
@@ -265,11 +275,11 @@ function refreshMapTheme() {
   if (map.getLayer("trees")) {
     map.setPaintProperty("trees", "circle-color", colorExpr());
     map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
-    map.setPaintProperty("sel", "circle-stroke-color", css("--accent"));
+    map.setPaintProperty("sel", "circle-stroke-color", css("--c-ink"));
     map.setPaintProperty("near", "line-color", css("--accent"));
     map.setPaintProperty("trail", "line-color", TRAIL_COLOR());
     map.setPaintProperty("trail-casing", "line-color", dark() ? "#0f1411" : "#ffffff");
-    map.setPaintProperty("pois", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
+    for (const [k, v] of Object.entries(poiPaint())) map.setPaintProperty("pois", k, v);
     buildLegendItems();
   }
 }
@@ -933,7 +943,7 @@ function poiSection(rows, title, withDistance = false) {
     <span class="meta">${withDistance ? `${Number(p.dist_m)} m` : ""}</span></button></li>`;
   return `<h3>${esc(title)}</h3>
     ${counts.size ? `<div class="poi-counts">${[...counts].sort((a, b) => b[1] - a[1]).map(([c, n]) =>
-      `<span class="chip"><span class="dot" style="background:${POI_COLOR.amenity}"></span>${esc(c)} ${fmt.format(n)}</span>`).join("")}</div>` : ""}
+      `<span class="chip"><span class="dot ring" style="color:${poiColor("amenity")}"></span>${esc(c)} ${fmt.format(n)}</span>`).join("")}</div>` : ""}
     ${named.length ? `<ul class="list">${named.map((p) => row(p, rows.indexOf(p))).join("")}</ul>` : ""}
     <p class="note">Amenities: NParks. Hawker centres: NEA. Historic sites and national monuments: National Heritage Board. Tap a dot on the map for details.</p>`;
 }

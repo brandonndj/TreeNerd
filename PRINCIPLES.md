@@ -55,6 +55,9 @@ README's Methodology, and decide what the page shows when the value is unknown.
 - **Taps answer at once.** If the answer takes time, a loading state appears; a slow answer never
   replaces something the person opened afterwards.
 - **Light and dark** both stay readable.
+- **Colour-blind safe.** Colour is never the only way to tell things apart (legends and labels name
+  them), and every set of colours that carries meaning stays distinguishable with protanopia,
+  deuteranopia and tritanopia. `tests/test_colours.py` checks this; use `tools/colours.py` to pick new colours.
 - **Works on restrictive networks:** ordinary requests only, with no reliance on partial-file requests.
 
 **Enforced by**

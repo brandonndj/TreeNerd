@@ -2,10 +2,20 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-24: Colours for colour-blind visitors
+
+### Changed
+- New map colours that stay easy to tell apart with red-green colour blindness (and blue-yellow too), in light and dark mode. Before, botanic-garden and conservation-area trees looked almost the same to some people, as did native and non-native species.
+- Park amenities, hawker centres and heritage sites are now hollow rings on the map, each kind in its own colour, so they no longer look like tree dots.
+- Trails and the selected-tree ring are now dark blue (white in dark mode), apart from every tree colour.
+
+### Internal
+- `tests/test_colours.py` reads the colours from `public/app.css` and `public/app.js`, simulates protanopia, deuteranopia and tritanopia (Machado et al. 2009) and fails if any two colours that carry meaning come within CIEDE2000 ΔE 15 of each other. `tools/colours.py` prints a report.
+
 ## 2026-11-23: Temperature card, and corrections
 
 ### Changed
-- The live air temperature is now a card near the top of park pages and "near" views: a large reading, the NEA station it comes from, how far away it is, and when it was taken. The card's colour runs from blue to red on Singapore's own scale: blue under 26 °C, teal to 29 °C, amber to 31 °C, orange to 33 °C, red above.
+- The live air temperature is now a card near the top of park pages and "near" views: a large reading, the NEA station it comes from, how far away it is, and when it was taken. The card's colour runs from blue to red on Singapore's own scale: dark blue under 26 °C, light blue to 29 °C, yellow to 31 °C, orange to 33 °C, dark red above.
 
 ### Fixed
 - The About panel said trees in parks are listed under the park. In fact a park tree within 30 m of a named road counts for both the road and the park (about 29% of park trees), so it appears on both pages. The text now says so.

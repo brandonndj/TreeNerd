@@ -3,8 +3,10 @@
   --bg: #f6f7f4; --surface: #ffffff; --surface-2: #f0f2ec; --text: #17201a; --muted: #5d6b61;
   --border: #dde2d8; --accent: #1f7a3f; --accent-ink: #ffffff; --shadow: 0 6px 24px rgba(20, 35, 25, .16);
   --radius: 14px; --tap: 44px;
-  --c-street: #2f9e44; --c-park: #0b7285; --c-botanic: #7048e8; --c-user: #e8590c;
-  --c-conservation: #1971c2; --c-heritage: #c2255c; --c-other: #868e96;
+  /* Data colours: chosen so every pair stays distinct with red-green (protanopia, deuteranopia) and
+     blue-yellow (tritanopia) colour blindness. Checked by tests/test_colours.py; change them only there first. */
+  --c-street: #097e07; --c-park: #2aa0f4; --c-botanic: #471471; --c-user: #f29e0d;
+  --c-conservation: #482af4; --c-heritage: #71142b; --c-other: #868e96; --c-ink: #0b3d91;
   --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
   color-scheme: light;
@@ -13,16 +15,16 @@
   :root:not([data-theme="light"]) {
     --bg: #0f1411; --surface: #18201b; --surface-2: #222c25; --text: #e7eee8; --muted: #9aa89e;
     --border: #2d3830; --accent: #51cf66; --accent-ink: #0b1a10; --shadow: 0 6px 24px rgba(0, 0, 0, .5);
-    --c-street: #69db7c; --c-park: #3bc9db; --c-botanic: #b197fc; --c-user: #ffa94d;
-    --c-conservation: #74c0fc; --c-heritage: #f783ac; --c-other: #adb5bd;
+    --c-street: #c8e6b3; --c-park: #57c7be; --c-botanic: #8f40dd; --c-user: #f5f247;
+    --c-conservation: #9c8eeb; --c-heritage: #dd4077; --c-other: #868e96; --c-ink: #f1f3f5;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1411; --surface: #18201b; --surface-2: #222c25; --text: #e7eee8; --muted: #9aa89e;
   --border: #2d3830; --accent: #51cf66; --accent-ink: #0b1a10; --shadow: 0 6px 24px rgba(0, 0, 0, .5);
-  --c-street: #69db7c; --c-park: #3bc9db; --c-botanic: #b197fc; --c-user: #ffa94d;
-  --c-conservation: #74c0fc; --c-heritage: #f783ac; --c-other: #adb5bd;
+  --c-street: #c8e6b3; --c-park: #57c7be; --c-botanic: #8f40dd; --c-user: #f5f247;
+  --c-conservation: #9c8eeb; --c-heritage: #dd4077; --c-other: #868e96; --c-ink: #f1f3f5;
   color-scheme: dark;
 }
 
@@ -118,14 +120,15 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 .weather-card { --w: var(--c-street); display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 14px;
   margin: 0 0 14px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--w) 35%, var(--border));
   background: linear-gradient(135deg, color-mix(in srgb, var(--w) 16%, var(--surface)), color-mix(in srgb, var(--w) 5%, var(--surface))); }
-/* blue (coolest) to red (hottest); bands in app.js (tempBand) */
-.weather-card[data-band="cool"] { --w: #1c7ed6; }
-.weather-card[data-band="mild"] { --w: #0c8599; }
-.weather-card[data-band="warm"] { --w: #f59f00; }
-.weather-card[data-band="hot"] { --w: #f76707; }
-.weather-card[data-band="very-hot"] { --w: #e03131; }
+/* blue (coolest) to dark red (hottest), stepping in lightness too, so the order survives colour
+   blindness; bands in app.js (tempBand), colours checked by tests/test_colours.py */
+.weather-card[data-band="cool"] { --w: #2166ac; }
+.weather-card[data-band="mild"] { --w: #6fb8e0; }
+.weather-card[data-band="warm"] { --w: #ffd23f; }
+.weather-card[data-band="hot"] { --w: #cc5500; }
+.weather-card[data-band="very-hot"] { --w: #6d0a10; }
 .weather-main { display: flex; align-items: center; gap: 8px; }
-.weather-icon { color: var(--w); flex: none; }
+.weather-icon { color: color-mix(in srgb, var(--w) 75%, var(--text)); flex: none; } /* stays visible on its own tint */
 .weather-reading { display: flex; flex-direction: column; line-height: 1.1; }
 .weather-temp { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .weather-unit { font-size: 16px; font-weight: 600; margin-left: 2px; color: var(--muted); }
@@ -135,6 +138,7 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 @media (max-width: 360px) { .weather-card { grid-template-columns: 1fr; } .weather-where { text-align: left; } }
 .poi-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .poi-counts .chip { font-size: 12px; }
+.dot.ring { background: transparent !important; border: 2.5px solid currentColor; box-sizing: border-box; }
 .maplibregl-popup.poi-popup .maplibregl-popup-content { background: var(--surface); color: var(--text); border-radius: 12px;
   box-shadow: var(--shadow); padding: 10px 12px; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .maplibregl-popup.poi-popup .maplibregl-popup-tip { border-top-color: var(--surface); border-bottom-color: var(--surface); }
