@@ -2,6 +2,12 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-25: Steadier updates and weather
+
+### Internal
+- The missed-update check now asks for the data update whenever the data is over 8 days old (at most once every 20 hours), without also requiring an NParks edit. The decision is `rebuildDue` in `src/schedule.ts`, tested in `tests/schedule.test.mjs`.
+- An NEA reply with HTTP 200 that isn't valid JSON is no longer cached as healthy for 2 minutes: it's backed off for 20 seconds like an error, and `/status` says so.
+
 ## 2026-11-25: Tree Conservation Areas
 
 ### Added

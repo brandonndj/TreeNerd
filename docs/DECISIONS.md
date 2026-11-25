@@ -146,6 +146,16 @@ API answers are keyed to the build. Live weather is cached for a minute and neve
 **Tests run on their own Worker environment**, with a rate limit a fast test run can't hit, and on
 WebKit (macOS) as well as Chromium, because most visitors use Safari on iOS.
 
+**A missed weekly update is requested again, even if NParks hasn't edited.** The Worker's 6-hourly
+check asks GitHub to run the update once the data is over 8 days old, at most once every 20 hours.
+It used to require an NParks edit too, so a skipped run in a quiet week left the site marked "update
+overdue" with nothing to fix it, while other sources (data.gov.sg, roads) may have changed. The cost is
+the update that was missed, not an extra one; a run that keeps failing still opens an issue each time.
+
+**A bad NEA reply is never cached as healthy.** A reply is checked to be valid data before it's cached
+for 2 minutes; one that isn't is treated like an error (cached for 20 seconds, so callers back off
+instead of all asking again at once).
+
 **One page shows whether every dependency works.** `/status` checks the other services live on load (reused
 for 30 seconds, rate-limited like the API), but reads NEA through the weather card's shared cache and reads when the scheduled jobs last ran. It shows whether each
 secret is set and accepted, never its value. The jobs record their last run in the live database's meta
