@@ -122,5 +122,11 @@ API answers are keyed to the build. Live weather is cached for a minute and neve
 **Tests run on their own Worker environment**, with a rate limit a fast test run can't hit, and on
 WebKit (macOS) as well as Chromium, because most visitors use Safari on iOS.
 
+**One page shows whether every dependency works.** `/status` runs live checks on load (reused for 30
+seconds, rate-limited like the API) and reads when the scheduled jobs last ran. It shows whether each
+secret is set and accepted, never its value. The jobs record their last run in the live database's meta
+table (about 840 rows a month); that history starts again after each weekly update, which replaces the
+database. It isn't linked or indexed; Cloudflare Access is what actually keeps it private.
+
 **The dev site is behind Cloudflare Access** and shows a banner, so unfinished work isn't mistaken for
 the live site.

@@ -2,5 +2,6 @@ User-agent: *
 Allow: /
 Disallow: /api/
 Disallow: /data/
+Disallow: /status
 
 Sitemap: https://treenerd.fyi/sitemap.xml

@@ -66,7 +66,7 @@ Cloudflare Worker
 - **Tiles**: one [PMTiles](https://protomaps.com/docs/pmtiles) archive in storage. The Worker reads it and serves ordinary tile requests, so the map also works on networks that block partial-file requests.
 - **Worker**: TypeScript on Cloudflare Workers, with D1 (database), R2 (files) and edge caching keyed to each data build.
 - **Zero-downtime updates**: two databases take turns. Each update loads the idle one, checks it, then switches the site over, together with the tiles and search files that belong to it. The previous build stays as a rollback, which the `Roll back data` workflow restores.
-- **Monitoring**: `/api/health` reports whether everything is present and the data is fresh. A failed update opens an issue, and a missed weekly update triggers a rebuild.
+- **Monitoring**: `/api/health` reports whether everything is present and the data is fresh. `/status` (and `/status.json`) is the owner's page of every dependency: the data build, each NEA feed fetched live, NParks' tree layer, OneMap search and basemap, whether each key or token is set and accepted (never its value), and when the scheduled checks last ran. It isn't linked or indexed; put it behind Cloudflare Access to keep it private. A failed update opens an issue, and a missed weekly update triggers a rebuild.
 - **Pipeline**: Python with Shapely; tiles are built with Tippecanoe.
 
 | Path | Contents |

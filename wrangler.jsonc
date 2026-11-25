@@ -8,7 +8,7 @@
     "directory": "./public",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/", "/robots.txt", "/sitemap.xml", "/api/*", "/data/*", "/tiles/*"]
+    "run_worker_first": ["/", "/robots.txt", "/sitemap.xml", "/status", "/status.json", "/api/*", "/data/*", "/tiles/*"]
   },
   // Only serve on the custom domain; no *.workers.dev or preview hostnames.
   "workers_dev": false,

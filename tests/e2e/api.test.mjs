@@ -219,3 +219,22 @@ test("the dev preview host is kept out of search engines; the real host isn't", 
   assert.equal(live.headers["x-robots-tag"], undefined);
   assert.match((await asHost("treenerd.fyi", "/robots.txt")).body, /Allow: \//);
 });
+
+test("status page: every dependency listed, not indexed, no secrets", async () => {
+  const r = await get("/status");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  assert.match(r.headers.get("x-robots-tag"), /noindex/);
+  const html = await r.text();
+  for (const s of ["Data", "NEA weather feeds", "Other services", "Keys and tokens", "Scheduled jobs", "NEA air", "OneMap address search",
+    "data.gov.sg API key (Worker)", "GitHub token", "Hourly NEA check"]) assert.ok(html.includes(s), s);
+  const j = await getJson("/status.json");
+  assert.ok(["ok", "warn", "fail"].includes(j.overall));
+  assert.equal(j.sections.find((s) => s.title === "NEA weather feeds").checks.length, 7);
+  for (const c of j.sections.flatMap((s) => s.checks)) assert.ok(["ok", "warn", "fail", "off"].includes(c.level) && c.detail, JSON.stringify(c));
+  // the test Worker has no secrets: each shows as not set, never a value
+  const keys = j.sections.find((s) => s.title === "Keys and tokens").checks;
+  assert.match(keys.find((c) => c.name.startsWith("data.gov.sg")).detail, /^not set/);
+  assert.doesNotMatch(await (await get("/robots.txt")).text(), /^Allow: \/status/m);
+  assert.match(await (await get("/robots.txt")).text(), /Disallow: \/status/);
+});
