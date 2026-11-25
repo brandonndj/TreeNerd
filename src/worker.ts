@@ -524,14 +524,18 @@ async function apiWeather(url: URL, env: Env, ctx: ExecutionContext) {
 const ONEMAP = "https://www.onemap.gov.sg";
 let onemapToken: { value: string; exp: number } | null = null;
 
-/** Token from the configured OneMap account, cached until shortly before it expires. */
-async function getOnemapToken(env: Env, force = false) {
+/**
+ * Token from the configured OneMap account, cached until shortly before it expires. `signal` lets a
+ * caller with a time limit (the status page) abort the sign-in.
+ */
+async function getOnemapToken(env: Env, force = false, signal?: AbortSignal) {
   if (!env.ONEMAP_EMAIL || !env.ONEMAP_PASSWORD) return null;
   if (!force && onemapToken && onemapToken.exp - Date.now() > 3600_000) return onemapToken.value;
   const res = await fetch(`${ONEMAP}/api/auth/post/getToken`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: env.ONEMAP_EMAIL, password: env.ONEMAP_PASSWORD }),
+    signal,
   });
   if (!res.ok) { console.error("OneMap token request failed:", res.status); return null; }
   const d = await res.json<{ access_token?: string; expiry_timestamp?: string | number }>();
@@ -791,7 +795,7 @@ async function statusReport(env: Env): Promise<Report> {
       return { status: r.status, edit: r.ok ? (await r.json<{ editingInfo?: { lastEditDate?: number } }>()).editingInfo?.lastEditDate : undefined };
     }),
     timed(async (signal) => {
-      const token = await getOnemapToken(env);
+      const token = await getOnemapToken(env, false, signal); // the sign-in counts toward the time limit too
       const r = await fetch(`${ONEMAP}/api/common/elastic/search?searchVal=238823&returnGeom=N&getAddrDetails=N&pageNum=1`,
         { headers: { ...ua, ...(token ? { authorization: token } : {}) }, signal });
       return { status: r.status, token: !!token };
