@@ -191,8 +191,9 @@ details.changes summary { cursor: pointer; color: var(--accent); padding: 8px 0;
 .legend.collapsed .legend-dots { display: inline-flex; }
 .legend-dots .dot { width: 10px; height: 10px; margin: 0; }
 .legend-dots .dot.ring { border-width: 2px; }
-.legend-all { display: block; width: 100%; margin-top: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px;
-  background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13px; }
+/* a quiet text button, like the footer links; on touch screens its tap area is still 44 points (below) */
+.legend-all { display: flex; align-items: center; width: fit-content; margin: 0 0 0 auto; padding: 4px 0; border: 0;
+  background: none; color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; }
 .legend-all[hidden] { display: none; }
 .legend label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
 .legend input { accent-color: var(--accent); margin: 0; width: 18px; height: 18px; }

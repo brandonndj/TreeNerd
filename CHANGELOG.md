@@ -15,7 +15,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - The weather card now also appears on tree pages, planning areas, subzones and roads up to 3 km across, as well as parks and the area around any spot. It says where its distances are measured from.
 
 ### Changed
-- The map's "Show" panel is now called "Tree types". Even when it's closed, it shows the colour of each type and how many trees are on the map. If some types are switched off, it says so (for example "4 of 6 types") with their dots shown as hollow rings, and a "Show all" button switches them all back on.
+- The map's "Show" panel is now called "Tree types". Even when it's closed, it shows the colour of each type and how many trees are on the map. If some types are switched off, it says so (for example "4 of 6 types") with their dots shown as hollow rings, and a "Show all" link switches them all back on.
 - New map colours that stay easy to tell apart with red-green colour blindness (and blue-yellow too), in light and dark mode. Before, botanic-garden and conservation-area trees looked almost the same to some people, as did native and non-native species.
 - Park amenities, hawker centres and heritage sites are now hollow rings on the map, each kind in its own colour, so they no longer look like tree dots.
 - Trails and the selected-tree ring are now dark blue (white in dark mode), apart from every tree colour.
