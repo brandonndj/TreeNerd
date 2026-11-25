@@ -21,7 +21,6 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - Trails and the selected-tree ring are now dark blue (white in dark mode), apart from every tree colour.
 
 ### Fixed
-- On tree pages the weather card no longer sits right against the buttons above it.
 - The site no longer says it shows "every tree in Singapore". It shows the trees NParks records (the current count is in the About panel); forest trees, such as those in the nature reserves, aren't recorded one by one.
 - Weather distances under 1 km are shown to the nearest 100 m, matching how precisely the location is looked up.
 - Rankings say how many places they list ("Top 12") instead of always "Top 25", which was wrong when fewer qualified.
