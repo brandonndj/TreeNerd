@@ -5,7 +5,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 ## 2026-11-25: Tree Conservation Areas
 
 ### Added
-- Tree Conservation Areas: NParks' two protected areas, Central and Changi, each have a page with its boundary on the map, the trees NParks records there and its top species. Search for "Tree Conservation Area", or switch on "Tree Conservation Areas" in the Tree types panel to see both outlined on the map.
+- Tree Conservation Areas (arriving with the weekly data update on Sunday night, early Monday in Singapore): NParks' two protected areas, Central and Changi, each have a page with its boundary on the map, the trees NParks records there and its top species. Search for "Tree Conservation Area", or switch on "Tree Conservation Areas" in the Tree types panel to see both outlined on the map.
 - Each page explains NParks' rule: inside these areas, cutting any tree with a girth of more than 1 m, measured 1 m above the ground, needs NParks' written approval, including trees on private land such as homes and condos. Most private trees aren't in NParks' records, so they aren't shown on the map.
 - A tree inside one of the areas now links to that area's page and states the rule.
 
