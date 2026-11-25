@@ -877,7 +877,7 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
       detail: set(env.ONEMAP_EMAIL) && set(env.ONEMAP_PASSWORD) ? (onemapSearch.value?.token ? "set, and signing in works" : "set, but signing in failed") : "not set (optional)" },
     { name: "GitHub token", level: !set(env.GITHUB_TOKEN) ? "warn" : github.value === 200 ? "ok" : "fail", ms: set(env.GITHUB_TOKEN) ? github.ms : undefined,
       detail: !set(env.GITHUB_TOKEN) ? "not set: a missed weekly update won't be retried and NEA alerts can't open issues"
-        : github.value === 200 ? `set, and accepted for ${env.GITHUB_REPO}` : `set, but GitHub answered ${github.value ?? github.error}` },
+        : github.value === 200 ? "set, and accepted for the repository" : `set, but GitHub answered ${github.value ?? github.error}` }, // no account or repo name: the page is public
   ];
 
   // A job that hasn't run yet is expected for one interval after a deploy or a data update (each update

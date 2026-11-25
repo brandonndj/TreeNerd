@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // API and HTTP behaviour of the Worker, against the local fixture site (see run.mjs).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -6,6 +7,8 @@ import http from "node:http";
 const B = process.env.E2E_BASE || "http://127.0.0.1:8799";
 const get = (path, init) => fetch(B + path, init);
 const getJson = async (path) => { const r = await get(path); assert.equal(r.status, 200, path); return r.json(); };
+// The GitHub account that owns the repository (from wrangler.jsonc): it must never appear on the site.
+const OWNER = new RegExp(`${readFileSync(new URL("../../wrangler.jsonc", import.meta.url), "utf8").match(/"GITHUB_REPO": "([^/"]+)\//)[1]}|github\\.com/`, "i");
 /** Request with a chosen Host header (fetch can't set one). */
 const asHost = (host, path) => new Promise((resolve, reject) => {
   const u = new URL(B + path);
@@ -237,6 +240,8 @@ test("status page: every dependency listed, not indexed, no secrets", async () =
   assert.match(keys.find((c) => c.name.startsWith("data.gov.sg")).detail, /^not set/);
   assert.doesNotMatch(await (await get("/robots.txt")).text(), /^Allow: \/status/m);
   assert.match(await (await get("/robots.txt")).text(), /Disallow: \/status/);
+  // nothing on the page names the owner's account or repository
+  assert.doesNotMatch(html + JSON.stringify(j), OWNER);
 });
 
 test("Tree Conservation Areas: figures from the build, no tree list, an outline file", async () => {
@@ -252,4 +257,13 @@ test("Tree Conservation Areas: figures from the build, no tree list, an outline 
   assert.equal(shapes.features[0].geometry.type, "Polygon");
   const search = await getJson("/api/search?q=tree%20conservation");
   assert.ok(search.results.some((r) => r.kind === "tca" && r.slug === "central-tree-conservation-area"), JSON.stringify(search.results));
+});
+
+test("no page or public file names the owner's account", async () => {
+  // the account is read from the Worker config, so the name isn't written into the tests too
+  for (const path of ["/", "/status", "/status.json", "/.well-known/security.txt", "/manifest.webmanifest", "/robots.txt", "/app.js", "/api/meta"]) {
+    const r = await get(path);
+    assert.doesNotMatch(await r.text(), OWNER, path);
+  }
+  assert.match(await (await get("/.well-known/security.txt")).text(), /^Contact: https:\/\/t\.me\/treenerd$/m);
 });

@@ -13,6 +13,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - The About panel explains that the "Conservation" tree type is NParks' own record of conservation trees, mostly in nature parks and reserves, and isn't the same as the Tree Conservation Areas.
 
 ### Internal
+- The site no longer names the owner's GitHub account: `/status` says the token is "accepted for the repository", and `/.well-known/security.txt` gives the Telegram channel as the contact. A test checks every page and public file for the account name, read from `wrangler.jsonc`.
 - New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are published as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
 
 ## 2026-11-25: Steadier weather readings
