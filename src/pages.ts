@@ -18,6 +18,7 @@ export const PAGE_HEADERS: Record<string, string> = {
 const KIND_LABEL: Record<string, string> = {
   road: "Road", park: "Park", subzone: "Subzone", planning_area: "Planning area", pcn: "Park connector",
   constituency: "Constituency", heritage_road: "Heritage road", trail: "Trail",
+  tca: "Tree Conservation Area",
 };
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,119}$/;
 const fmt = new Intl.NumberFormat("en-SG");

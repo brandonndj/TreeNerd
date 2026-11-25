@@ -97,3 +97,16 @@ class SpatialTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AreaShapeTests(unittest.TestCase):
+    def test_outline_keeps_slug_name_and_shape(self):
+        from pipeline.extras import area_shapes
+        square = {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [[
+            [103.80, 1.30, 0], [103.80000001, 1.305, 0], [103.80, 1.31, 0], [103.81, 1.31, 0], [103.81, 1.30, 0], [103.80, 1.30, 0]]]}}
+        out = area_shapes([(square, "an-area", "An Area")])
+        f = out["features"][0]
+        self.assertEqual(f["properties"], {"s": "an-area", "n": "An Area"})
+        ring = f["geometry"]["coordinates"][0]
+        self.assertEqual(len(ring), 5, "the needless middle point is simplified away, the corners stay")
+        self.assertTrue(all(len(p) == 2 for p in ring), "2D only")

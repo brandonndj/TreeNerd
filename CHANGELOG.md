@@ -2,6 +2,19 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-25: Tree Conservation Areas
+
+### Added
+- Tree Conservation Areas: NParks' two protected areas, Central and Changi, each have a page with its boundary on the map, the trees NParks records there and its top species. Search for "Tree Conservation Area", or switch on "Tree Conservation Areas" in the Tree types panel to see both outlined on the map.
+- Each page explains NParks' rule: inside these areas, cutting any tree with a girth of more than 1 m, measured 1 m above the ground, needs NParks' written approval, including trees on private land such as homes and condos. Most private trees aren't in NParks' records, so they aren't shown on the map.
+- A tree inside one of the areas now links to that area's page and states the rule.
+
+### Changed
+- The About panel explains that the "Conservation" tree type is NParks' own record of conservation trees, mostly in nature parks and reserves, and isn't the same as the Tree Conservation Areas.
+
+### Internal
+- New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are published as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
+
 ## 2026-11-25: Steadier weather readings
 
 ### Fixed

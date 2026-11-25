@@ -195,6 +195,10 @@ details.changes summary { cursor: pointer; color: var(--accent); padding: 8px 0;
 .legend-all { display: flex; align-items: center; width: fit-content; margin: 0 0 0 auto; padding: 4px 0; border: 0;
   background: none; color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; }
 .legend-all[hidden] { display: none; }
+/* the Tree Conservation Areas switch: an outline on the map, so set apart from the tree types */
+.legend-area { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border); }
+.area-swatch { display: inline-block; width: 12px; height: 12px; flex: none; border: 2px dashed var(--c-ink); border-radius: 2px;
+  background: color-mix(in srgb, var(--c-ink) 8%, transparent); box-sizing: border-box; }
 .legend label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
 .legend input { accent-color: var(--accent); margin: 0; width: 18px; height: 18px; }
 .legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }

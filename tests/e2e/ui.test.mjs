@@ -284,6 +284,67 @@ test("weather card: every reading names where it's from, lightning first, nothin
   await t.ctx.close();
 });
 
+test("Tree Conservation Area: its page, NParks' rule, the outline, and the link from a tree inside it", async () => {
+  const api = await (await fetch(`${B}/api/place/tca/central-tree-conservation-area`)).json();
+  const outlines = [];
+  const { ctx, page, errors } = await open("/?p=tca/central-tree-conservation-area", undefined, B, (c) =>
+    c.on("request", (r) => { if (r.url().includes("/data/tca.geojson")) outlines.push(r.url()); }));
+  await panelTitle(page, "Central Tree Conservation Area");
+  const text = (await page.textContent("#panel-body")).replace(/\s+/g, " ");
+  assert.match(text, /girth of more than 1 m, measured 1 m above the ground, needs written approval from NParks/);
+  assert.match(text, /includes trees on private land, such as homes and condos/);
+  assert.match(text, /Most trees on private land aren't in NParks' records, so they aren't shown on this map/);
+  assert.match(text, new RegExp(`${new Intl.NumberFormat("en-SG").format(api.tree_count)} ?trees NParks records here`));
+  assert.doesNotMatch(text, /\$50,000/, "the fine isn't stated: not confirmed from a primary source");
+  assert.equal(await page.getAttribute('#panel-body a[href*="nparks.gov.sg"]', "href"), "https://www.nparks.gov.sg/services/development-plan-submission/before-submit-development-plan");
+  assert.equal(await page.$("#tree-list"), null, "the area's trees aren't listed");
+  await page.waitForTimeout(500);
+  assert.equal(outlines.length, 1, "the boundary is drawn");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // a tree inside it links to the page and states the rule
+  const t = await open("/?t=10687021");
+  await t.page.waitForSelector("#tca-link");
+  assert.match(await t.page.textContent("#panel-body"), /Cutting a tree here with a girth of more than 1 m, measured 1 m above the ground, needs written approval from NParks/);
+  await t.page.click("#tca-link");
+  await panelTitle(t.page, "Central Tree Conservation Area");
+  assert.match(t.page.url(), /p=tca(%2F|\/)central-tree-conservation-area/);
+  await t.ctx.close();
+});
+
+test("Tree Conservation Areas switch: outlines on the map, kept in the link, untouched by Show all; absent on older data", async () => {
+  const outlines = [];
+  const { ctx, page, errors } = await open("/?c=2", undefined, B, (c) =>
+    c.on("request", (r) => { if (r.url().includes("/data/tca.geojson")) outlines.push(r.url()); }));
+  await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  if (await page.getAttribute("#legend-toggle", "aria-expanded") === "false") await page.click("#legend-toggle");
+  assert.match(await page.textContent("#legend"), /Tree Conservation Areas/);
+  assert.equal(await page.isChecked("#legend-tca"), false);
+  await page.check("#legend-tca");
+  await page.waitForTimeout(300);
+  assert.match(page.url(), /[?&]tca=1/);
+  assert.equal(outlines.length, 1);
+  assert.match(await page.textContent("#total"), /of \d+ types/, "the switch isn't counted as a tree type");
+  await page.click("#legend-all");
+  assert.equal(await page.isChecked("#legend-tca"), true, "Show all is about tree types only");
+  await page.uncheck("#legend-tca");
+  assert.doesNotMatch(page.url(), /[?&]tca=1/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // data built before the areas: no switch, and tree pages name the area without a link
+  const old = (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json();
+    delete m.place_counts.tca;
+    await r.fulfill({ response: res, json: m });
+  });
+  const o = await open("/?t=10687021", undefined, B, old);
+  await o.page.waitForSelector("#panel-body h2");
+  assert.equal(await o.page.$("#legend-tca"), null);
+  assert.equal(await o.page.$("#tca-link"), null);
+  assert.match(await o.page.textContent("#panel-body"), /In Central Tree Conservation Area/);
+  await o.ctx.close();
+});
+
 test("tree types: the header keeps the colour key and any filter visible, and Show all undoes it", async () => {
   const fmt = new Intl.NumberFormat("en-SG");
   const meta = await (await fetch(`${B}/api/meta`)).json();
@@ -546,7 +607,8 @@ const IOS = [["iPhone portrait", "iPhone 15 Pro"], ["iPhone landscape", "iPhone 
   ["iPad Mini portrait", "iPad Mini"], ["iPad Pro 11 portrait", "iPad Pro 11"], ["iPad Pro 11 landscape", "iPad Pro 11 landscape"]];
 const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes",
   "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident",
-  "/?c=2,3"]; // a tree-type filter on: the "Show all" button and the filtered header
+  "/?c=2,3", // a tree-type filter on: the "Show all" button and the filtered header
+  "/?p=tca/central-tree-conservation-area", "/?tca=1"]; // a Tree Conservation Area page; the areas switch on
 
 for (const [label, device] of IOS) {
   test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {

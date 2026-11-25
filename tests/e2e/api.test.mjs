@@ -238,3 +238,18 @@ test("status page: every dependency listed, not indexed, no secrets", async () =
   assert.doesNotMatch(await (await get("/robots.txt")).text(), /^Allow: \/status/m);
   assert.match(await (await get("/robots.txt")).text(), /Disallow: \/status/);
 });
+
+test("Tree Conservation Areas: figures from the build, no tree list, an outline file", async () => {
+  const d = await getJson("/api/place/tca/central-tree-conservation-area");
+  assert.equal(d.kind, "tca");
+  assert.equal(d.trees_listed, false);
+  assert.ok(d.tree_count > 0 && d.species_count > 0, JSON.stringify(d));
+  assert.equal(d.categories.reduce((n, c) => n + c.n, 0), d.tree_count, "tree types add up to the tree count");
+  assert.equal((await get("/api/place/tca/central-tree-conservation-area/trees")).status, 404);
+  assert.equal((await get("/api/place/tca/central-tree-conservation-area/ids")).status, 404);
+  const shapes = await getJson("/data/tca.geojson");
+  assert.deepEqual(shapes.features.map((f) => f.properties.s), ["central-tree-conservation-area"]);
+  assert.equal(shapes.features[0].geometry.type, "Polygon");
+  const search = await getJson("/api/search?q=tree%20conservation");
+  assert.ok(search.results.some((r) => r.kind === "tca" && r.slug === "central-tree-conservation-area"), JSON.stringify(search.results));
+});

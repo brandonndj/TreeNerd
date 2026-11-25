@@ -73,6 +73,29 @@ class ConsistencyTests(unittest.TestCase):
         self.assertTrue(any("species 1: shows 7 trees, has 2" in p for p in audit.consistency(db, META, SEARCH)))
 
 
+class TreeConservationAreaTests(unittest.TestCase):
+    """Areas have no id column on trees: trees carry the area's name, and the audit re-counts by it."""
+
+    def build(self, shown=2, categories=None, tca_names=("Central Tree Conservation Area",) * 2):
+        db = make_db()
+        db.execute("""INSERT INTO places (id, kind, slug, name, tree_count, species_count, heritage_count, carbon_kg, top_species, extra)
+                      VALUES (40, 'tca', 'central-tree-conservation-area', 'Central Tree Conservation Area', ?, 1, 0, 300.0, '[[1,2]]', ?)""",
+                   (shown, json.dumps({"categories": categories or {"street": 2}})))
+        for tid, name in zip((100, 101), tca_names):
+            db.execute("UPDATE trees SET tca=? WHERE id=?", (name, tid))
+        meta = {**META, "place_counts": {**META["place_counts"], "tca": 1}}
+        search = SEARCH + [{"k": "tca", "s": "central-tree-conservation-area", "c": shown}]
+        return "\n".join(audit.consistency(db, meta, search))
+
+    def test_consistent_area_passes(self):
+        self.assertEqual(self.build(), "")
+
+    def test_wrong_count_types_or_unknown_area_are_caught(self):
+        self.assertIn("tca/central-tree-conservation-area: shows 3 trees", self.build(shown=3))
+        self.assertIn("tree types", self.build(categories={"street": 1, "park": 1}))
+        self.assertIn("in a Tree Conservation Area that has no page", self.build(tca_names=("Central Tree Conservation Area", "Elsewhere")))
+
+
 class PlausibilityTests(unittest.TestCase):
     def problems(self, trees, prev=None, species=None):
         meta = {**META, "tree_count": len(trees)}
