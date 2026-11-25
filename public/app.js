@@ -380,29 +380,60 @@ function showTreesHere(trees) {
 }
 
 // ------------------------------------------------------------------ legend
+// The types in this build (those with trees), and which of them are switched on. Counts come from the build.
+const presentCats = () => CATS.filter((c) => (state.meta?.category_counts || {})[c.key] || !state.meta);
 function buildLegendItems() {
   const counts = state.meta?.category_counts || {};
-  $("#legend-items").innerHTML = CATS.filter((c) => counts[c.key] || !state.meta).map((c) => `
+  $("#legend-items").innerHTML = presentCats().map((c) => `
     <label><input type="checkbox" data-c="${c.code}" ${state.cats.has(c.code) ? "checked" : ""}>
       <span class="dot" style="background:${catColor(c.key)}"></span>${c.label}
-      <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("");
+      <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("") +
+    `<button class="legend-all" id="legend-all" hidden>Show all</button>`;
+  updateLegendHeader();
+}
+/**
+ * The header says what's on the map even when the panel is closed: a dot per type (a hollow ring when
+ * switched off), and the number of trees shown. A filter is never hidden: "4 of 6 types" appears with
+ * a "Show all" button whenever any type is off.
+ */
+function updateLegendHeader() {
+  const counts = state.meta?.category_counts || {}, present = presentCats();
+  const on = present.filter((c) => state.cats.has(c.code)), all = on.length === present.length;
+  $("#legend-dots").innerHTML = present.map((c) => `<span class="dot${state.cats.has(c.code) ? "" : " ring"}" style="${
+    state.cats.has(c.code) ? `background:${catColor(c.key)}` : `color:${catColor(c.key)}`}"></span>`).join("");
+  const shown = on.reduce((n, c) => n + (counts[c.key] || 0), 0);
+  const trees = all ? state.meta?.tree_count : shown;
+  $("#total").textContent = !state.meta ? "" : all ? `${fmt.format(trees || 0)} trees`
+    : `${on.length} of ${present.length} types · ${fmt.format(shown)} trees`;
+  $("#legend").classList.toggle("filtered", !all);
+  const btn = $("#legend-all");
+  if (btn) btn.hidden = all;
 }
 function buildLegend() {
-  $("#total").textContent = state.meta?.tree_count ? `· ${fmt.format(state.meta.tree_count)} trees` : "";
   // Updates run weekly. If the data is clearly older than that, say so rather than look current.
   const age = state.meta?.built_at ? (Date.now() - Date.parse(state.meta.built_at)) / 86400e3 : 0;
   state.stale = age > 10;
   $("#updated").textContent = state.meta?.built_at ? `Updated ${fmtDate(state.meta.built_at)}${state.stale ? " · update overdue" : ""}` : "";
   $("#updated").classList.toggle("stale", state.stale);
   buildLegendItems();
-  $("#legend-items").addEventListener("change", (e) => {
-    const c = Number(e.target.dataset.c);
-    e.target.checked ? state.cats.add(c) : state.cats.delete(c);
+  const applyCats = () => {
     map.setFilter("trees", filterExpr());
     const u = new URL(location.href); // keep the choice in the link, so a shared link shows the same trees
     if (state.cats.size === CATS.length) u.searchParams.delete("c");
     else u.searchParams.set("c", [...state.cats].sort().join(","));
     history.replaceState(null, "", u);
+    updateLegendHeader();
+  };
+  $("#legend-items").addEventListener("change", (e) => {
+    const c = Number(e.target.dataset.c);
+    e.target.checked ? state.cats.add(c) : state.cats.delete(c);
+    applyCats();
+  });
+  $("#legend-items").addEventListener("click", (e) => {
+    if (e.target.id !== "legend-all") return;
+    CATS.forEach((c) => state.cats.add(c.code));
+    $("#legend-items").querySelectorAll("input").forEach((i) => { i.checked = true; });
+    applyCats();
   });
   const lg = $("#legend"), tg = $("#legend-toggle");
   const setCollapsed = (v, remember) => {

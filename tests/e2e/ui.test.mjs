@@ -284,6 +284,48 @@ test("weather card: every reading names where it's from, lightning first, nothin
   await t.ctx.close();
 });
 
+test("tree types: the header keeps the colour key and any filter visible, and Show all undoes it", async () => {
+  const fmt = new Intl.NumberFormat("en-SG");
+  const meta = await (await fetch(`${B}/api/meta`)).json();
+  const present = Object.entries(meta.category_counts).filter(([, n]) => n > 0);
+  const { ctx, page, errors } = await open("/");
+  await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  const head = () => page.evaluate(() => ({ total: document.querySelector("#total").textContent,
+    dots: document.querySelectorAll("#legend-dots .dot").length, rings: document.querySelectorAll("#legend-dots .dot.ring").length,
+    dotsShown: getComputedStyle(document.querySelector("#legend-dots")).display !== "none",
+    showAll: !document.querySelector("#legend-all").hidden, filtered: document.querySelector("#legend").classList.contains("filtered") }));
+  assert.match(await page.textContent("#legend-toggle"), /^\s*Tree types/);
+  let h = await head();
+  assert.equal(h.total, `${fmt.format(meta.tree_count)} trees`);
+  assert.ok(h.dots === present.length && h.rings === 0 && !h.showAll && !h.filtered, JSON.stringify(h));
+  // switch off street trees: the header says how many types and trees are shown, from the build's counts
+  await page.uncheck('#legend-items input[data-c="1"]');
+  h = await head();
+  const shown = present.filter(([k]) => k !== "street").reduce((n, [, c]) => n + c, 0);
+  assert.equal(h.total, `${present.length - 1} of ${present.length} types · ${fmt.format(shown)} trees`);
+  assert.ok(h.rings === 1 && h.showAll && h.filtered, JSON.stringify(h));
+  assert.match(page.url(), /[?&]c=/);
+  // closed: the dots stay, so the key and the filter are still visible
+  await page.click("#legend-toggle");
+  h = await head();
+  assert.ok(h.dotsShown && h.rings === 1, JSON.stringify(h));
+  assert.match(h.total, /of \d+ types/);
+  await page.click("#legend-toggle");
+  await page.click("#legend-all");
+  h = await head();
+  assert.equal(h.total, `${fmt.format(meta.tree_count)} trees`);
+  assert.ok(h.rings === 0 && !h.showAll && !h.filtered, JSON.stringify(h));
+  assert.doesNotMatch(page.url(), /[?&]c=/);
+  assert.equal(await page.isChecked('#legend-items input[data-c="1"]'), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // a shared link with a filter opens with it shown
+  const shared = await open("/?c=2"); // park trees only
+  await shared.page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  assert.equal(await shared.page.textContent("#total"), `1 of ${present.length} types · ${fmt.format(meta.category_counts.park)} trees`);
+  await shared.ctx.close();
+});
+
 test("weather card: on trees, areas, subzones, parks and short roads; never on trails or long roads", async () => {
   const pages = [["/?t=10687021", "this tree"], ["/?p=subzone/ntsz06", "the middle of the subzone"],
     ["/?p=planning_area/newton", "the middle of the area"], ["/?p=road/orchard-road", "the middle of the road"]];
@@ -503,7 +545,8 @@ test("phone: bottom sheet, collapsed legend, theme toggle", async () => {
 const IOS = [["iPhone portrait", "iPhone 15 Pro"], ["iPhone landscape", "iPhone 15 Pro landscape"],
   ["iPad Mini portrait", "iPad Mini"], ["iPad Pro 11 portrait", "iPad Pro 11"], ["iPad Pro 11 landscape", "iPad Pro 11 landscape"]];
 const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes",
-  "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident"];
+  "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident",
+  "/?c=2,3"]; // a tree-type filter on: the "Show all" button and the filtered header
 
 for (const [label, device] of IOS) {
   test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {
@@ -511,9 +554,10 @@ for (const [label, device] of IOS) {
       // layout is measured in points, so render at 1x: software rendering at an iPad's 2x is very slow
       // the weather card at its fullest, so its rows are measured too
       const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
-      if (path !== "/") await page.waitForSelector("#panel-body h2");
+      if (/[?&](p|t|top|near)=/.test(path)) await page.waitForSelector("#panel-body h2");
+      else if (path === "/") { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
+      else await page.waitForFunction(() => document.querySelector("#total")?.textContent);
       if (await page.$("#weather")) await page.waitForSelector("#weather:not([hidden]) .wx-rows");
-      else { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
       const report = await page.evaluate(() => {
         const shown = (e) => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
           return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && r.bottom > 0 && r.top < innerHeight; };

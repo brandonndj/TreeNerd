@@ -180,15 +180,26 @@ details.changes summary { cursor: pointer; color: var(--accent); padding: 8px 0;
 .legend { position: fixed; z-index: 3; right: max(12px, var(--safe-r)); top: max(12px, var(--safe-t));
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 8px 12px; font-size: 13px; max-width: 230px; }
-.legend-title { font-weight: 600; display: flex; align-items: center; min-height: 32px; gap: 4px; border: 0;
-  background: none; padding: 0; width: 100%; text-align: left; }
+.legend-title { display: flex; flex-direction: column; align-items: stretch; justify-content: center; min-height: 32px; gap: 1px; border: 0;
+  background: none; padding: 0; width: 100%; text-align: left; color: var(--text); }
+.legend-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.legend-total { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.legend.filtered .legend-total { color: var(--text); font-weight: 600; } /* a filter is on: say so plainly */
+/* the colour key stays visible when the panel is closed; a switched-off type is a hollow ring */
+.legend-dots { display: none; gap: 4px; align-items: center; }
+.legend.collapsed .legend-dots { display: inline-flex; }
+.legend-dots .dot { width: 10px; height: 10px; margin: 0; }
+.legend-dots .dot.ring { border-width: 2px; }
+.legend-all { display: block; width: 100%; margin-top: 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-2); color: var(--text); font-weight: 600; font-size: 13px; }
+.legend-all[hidden] { display: none; }
 .legend label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
 .legend input { accent-color: var(--accent); margin: 0; width: 18px; height: 18px; }
 .legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .legend-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px;
   padding-top: 6px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 .legend.collapsed #legend-items, .legend.collapsed .legend-foot { display: none; }
-.legend-title .chev { margin-left: auto; padding-left: 10px; color: var(--muted); transition: transform .15s ease; }
+.legend-title .chev { margin-left: auto; padding-left: 4px; color: var(--muted); transition: transform .15s ease; }
 .legend.collapsed .legend-title .chev { transform: rotate(-90deg); }
 .legend-foot button, .legend-foot a { border: 0; background: none; color: var(--accent); padding: 6px 0; font-size: 12px; text-decoration: underline; }
 .foot-links { display: inline-flex; gap: 12px; }
@@ -239,7 +250,7 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
 
 /* ---------- touch screens (iPhone, iPad): every control is at least 44 x 44 points ---------- */
 @media (pointer: coarse) {
-  .legend-title, .legend label { min-height: var(--tap); }
+  .legend-title, .legend label, .legend-all { min-height: var(--tap); }
   .legend-title { min-width: var(--tap); }
   .foot-links { gap: 4px; }
   .foot-links a, .foot-links button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap); min-width: var(--tap); padding: 0 6px; }

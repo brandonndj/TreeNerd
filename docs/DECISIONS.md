@@ -98,6 +98,12 @@ survives colour blindness.
 and nothing depends on hover. The weather card puts each reading's source on its own smaller line, so the
 value reads first.
 
+**The tree-types panel never hides a filter.** It's called "Tree types", not "Show" (which read as
+a button) or Show/Hide (which would sit above the checkboxes and read as "hide these trees"). Closed, it
+still shows a dot per type and the number of trees on the map, so the colours can be read and a filter
+can't be forgotten: switched-off types are hollow rings and the count reads "4 of 6 types". "Show all"
+appears only while something is off. Counts are the build's per-type counts.
+
 **Features hide until their data exists.** Trails and the per-resident rankings appear only once the
 live build has them. *Why:* code and data deploy separately, and an empty feature looks broken.
 
