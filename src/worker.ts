@@ -25,6 +25,7 @@ export interface Env {
   GITHUB_REF: string;
   ARCGIS_TREES_LAYER: string;
   GITHUB_TOKEN?: string;
+  CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string }; // when this Worker version was deployed
   DATAGOVSG_API_KEY?: string; // optional secret: data.gov.sg key, sent with NEA requests for higher rate limits
   ONEMAP_EMAIL?: string; // optional secrets: OneMap account used for address search
   ONEMAP_PASSWORD?: string;
@@ -473,22 +474,40 @@ async function apiTop(url: URL, env: Env) {
 const neaHeaders = (env: Env): Record<string, string> => ({
   "user-agent": "TreeNerd (+https://treenerd.fyi)", ...(env.DATAGOVSG_API_KEY ? { "x-api-key": env.DATAGOVSG_API_KEY } : {}),
 });
-async function neaFeed(feed: Feed, env: Env, ctx: ExecutionContext): Promise<unknown> {
+// data.gov.sg allows 12 real-time requests per 10 s with a development key (30 with a production key,
+// 6 without). Everything that reads NEA (visitors' cards, the hourly check, /status) goes through this
+// one shared cache, so all of them together make at most 7 requests per feed interval per data centre.
+const NEA_CACHE_S = 120;
+const NEA_BACKOFF_S = 20; // after a refusal (429) or an NEA error, don't ask again for this long
+interface NeaFetch { body: unknown; status: number; fetched_at: number; cached: boolean; error?: string }
+
+/** One NEA feed from the shared edge cache, or from NEA. A refusal is remembered briefly, so callers back off. */
+async function neaFetch(feed: Feed, env: Env, ctx: ExecutionContext, signal?: AbortSignal): Promise<NeaFetch> {
   const cache = caches.default, key = new Request(FEEDS[feed]);
-  let res = await cache.match(key);
-  if (!res) {
-    try {
-      const up = await fetch(FEEDS[feed], { headers: neaHeaders(env) });
-      if (!up.ok) throw new Error(`NEA returned ${up.status}`);
-      res = new Response(await up.text(), { headers: { "content-type": "application/json", "cache-control": "public, max-age=120" } });
-      ctx.waitUntil(cache.put(key, res.clone()));
-    } catch (e) {
-      console.error(`NEA ${feed} unavailable:`, String(e));
-      return null;
-    }
+  const hit = await cache.match(key);
+  if (hit) {
+    const status = Number(hit.headers.get("x-nea-status") ?? 200), fetched_at = Number(hit.headers.get("x-fetched-at") ?? 0);
+    if (status !== 200) return { body: null, status, fetched_at, cached: true };
+    try { return { body: await hit.json(), status, fetched_at, cached: true }; } catch { /* corrupt entry: fetch again */ }
   }
-  try { return await res.json(); } catch { return null; }
+  const remember = (body: string, status: number, maxAge: number) => ctx.waitUntil(cache.put(key, new Response(body, { headers: {
+    "content-type": "application/json", "cache-control": `public, max-age=${maxAge}`, "x-nea-status": String(status), "x-fetched-at": String(Date.now()) } })));
+  try {
+    const up = await fetch(FEEDS[feed], { headers: neaHeaders(env), signal });
+    if (!up.ok) {
+      console.error(`NEA ${feed}: HTTP ${up.status}`);
+      remember("", up.status, NEA_BACKOFF_S);
+      return { body: null, status: up.status, fetched_at: Date.now(), cached: false };
+    }
+    const text = await up.text();
+    remember(text, 200, NEA_CACHE_S);
+    return { body: JSON.parse(text), status: 200, fetched_at: Date.now(), cached: false };
+  } catch (e) {
+    console.error(`NEA ${feed} unavailable:`, String(e));
+    return { body: null, status: 0, fetched_at: Date.now(), cached: false, error: String(e) };
+  }
 }
+const neaFeed = async (feed: Feed, env: Env, ctx: ExecutionContext) => (await neaFetch(feed, env, ctx)).body;
 
 /**
  * Live conditions near a point: air temperature (`reading`, unchanged for older pages), heat stress,
@@ -699,19 +718,11 @@ const NEA_ALERT_EVERY = 24 * 3600_000; // while it lasts, remind at most once a 
  * Hourly: fetch every NEA feed and check it still gives what the weather card needs (feedProblems).
  * A problem lasting over an hour runs the "NEA feed alert" workflow, which opens an issue; recovery
  * runs it again to close the issue. State is two rows in the meta table, written only when it changes.
- * Cost: 7 requests an hour to NEA; no database writes while all is well.
+ * It reads through the shared NEA cache, so it adds at most 7 requests an hour.
  */
-async function checkNea(env: Env) {
+async function checkNea(env: Env, ctx: ExecutionContext) {
   const names = Object.keys(FEEDS) as Feed[];
-  const got = await Promise.all(names.map(async (f) => {
-    for (let i = 0; i < 2; i++) {
-      try {
-        const r = await fetch(FEEDS[f], { headers: neaHeaders(env) });
-        if (r.ok) return [f, await r.json()] as const;
-      } catch { /* try once more */ }
-    }
-    return [f, null] as const;
-  }));
+  const got = await Promise.all(names.map(async (f) => [f, (await neaFetch(f, env, ctx)).body] as const));
   const problems = feedProblems(Object.fromEntries(got), Date.now());
   // what the status page shows as the last hourly check (one row, ~720 writes a month)
   await env.DB.prepare("INSERT OR REPLACE INTO meta VALUES ('nea_last_check', ?)").bind(JSON.stringify({ at: Date.now(), problems })).run().catch(() => {});
@@ -757,7 +768,7 @@ async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 8000) {
   finally { clearTimeout(timer); }
 }
 
-async function statusReport(env: Env): Promise<Report> {
+async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
   if (statusCache && Date.now() - statusCache.at < 30_000) return statusCache.report;
   const now = Date.now(), fmtN = new Intl.NumberFormat("en-SG");
   const meta = await getMeta(env);
@@ -786,10 +797,7 @@ async function statusReport(env: Env): Promise<Report> {
   // ---- live checks, all at once
   const feeds = Object.keys(FEEDS) as Feed[];
   const [neaRes, arcgis, onemapSearch, basemap, github] = await Promise.all([
-    Promise.all(feeds.map((f) => timed(async (signal) => {
-      const r = await fetch(FEEDS[f], { headers: neaHeaders(env), signal });
-      return { status: r.status, body: r.ok ? await r.json() : null };
-    }))),
+    Promise.all(feeds.map((f) => timed((signal) => neaFetch(f, env, ctx, signal)))),
     timed(async (signal) => {
       const r = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: ua, signal });
       return { status: r.status, edit: r.ok ? (await r.json<{ editingInfo?: { lastEditDate?: number } }>()).editingInfo?.lastEditDate : undefined };
@@ -810,12 +818,15 @@ async function statusReport(env: Env): Promise<Report> {
 
   const problems = feedProblems(Object.fromEntries(feeds.map((f, i) => [f, neaRes[i].value?.body ?? null])), now);
   const nea: Check[] = feeds.map((f, i) => {
-    const r = neaRes[i], p = problems.find((x) => x.startsWith(`${f}:`));
-    const level: Level = r.error || !r.value || r.value.status !== 200 ? "fail" : p ? "warn" : "ok";
-    const detail = r.error ? `unreachable: ${r.error}` : r.value!.status !== 200
-      ? `HTTP ${r.value!.status}${r.value!.status === 401 || r.value!.status === 403 ? " (is the API key valid?)" : r.value!.status === 429 ? " (rate limited)" : ""}`
-      : p ? p.slice(f.length + 2) : "giving readings";
-    return { name: `NEA ${f}`, level, detail, ms: r.ms };
+    const r = neaRes[i], v = r.value, p = problems.find((x) => x.startsWith(`${f}:`));
+    const when = v ? ` (${v.cached ? `fetched ${ago(v.fetched_at, now)}, shared cache` : "fetched now"})` : "";
+    // a refusal (429) is brief and the card just leaves that reading out; the hourly check alerts if it lasts
+    const level: Level = r.error || !v || v.error || v.status === 0 ? "fail" : v.status === 429 ? "warn" : v.status !== 200 ? "fail" : p ? "warn" : "ok";
+    const detail = r.error ? `unreachable: ${r.error}` : v!.error || v!.status === 0 ? `unreachable: ${v!.error ?? "no answer"}`
+      : v!.status === 429 ? `data.gov.sg asked us to slow down (HTTP 429)${when}; the card leaves this reading out meanwhile`
+      : v!.status !== 200 ? `HTTP ${v!.status}${v!.status === 401 || v!.status === 403 ? " (is the API key valid?)" : ""}${when}`
+      : p ? `${p.slice(f.length + 2)}${when}` : `giving readings${when}`;
+    return { name: `NEA ${f}`, level, detail, ms: v?.cached ? undefined : r.ms };
   });
   const [neaLast, neaSince, neaAlerted, freshLast, lastDispatch] = await Promise.all(
     ["nea_last_check", "nea_problem_since", "nea_alerted_at", "freshness_last_check", "last_dispatch"].map(stored));
@@ -843,20 +854,28 @@ async function statusReport(env: Env): Promise<Report> {
         : github.value === 200 ? `set, and accepted for ${env.GITHUB_REPO}` : `set, but GitHub answered ${github.value ?? github.error}` },
   ];
 
+  // A job that hasn't run yet is expected for one interval after a deploy or a data update (each update
+  // replaces the database where the jobs record their runs); only after that is it a problem.
+  const deployedAt = Date.parse(env.CF_VERSION_METADATA?.timestamp ?? "");
+  const since = Math.max(Number.isFinite(builtAt) ? builtAt : 0, Number.isFinite(deployedAt) ? deployedAt : 0);
+  const notYet = (everyMs: number, name: string): Check => since && now - since < everyMs + 15 * 60_000
+    ? { name, level: "ok", detail: `not run yet since the ${since === deployedAt ? "last deploy" : "last data update"} ${ago(since, now)}; it runs within ${Math.round(everyMs / 3600_000)} h` }
+    : { name, level: "warn", detail: "no run recorded yet (runs are recorded in the live database, so this starts again after each weekly update)" };
   const jobs: Check[] = [
-    { name: "Hourly NEA check", level: !neaLastParsed ? "warn" : now - neaLastParsed.at > 2.5 * 3600_000 ? "fail" : neaLastParsed.problems.length ? "warn" : "ok",
-      detail: !neaLastParsed ? "no run recorded yet (it records in the live database, so this starts again after each weekly update)"
-        : `last ran ${ago(neaLastParsed.at, now)}: ${neaLastParsed.problems.length ? neaLastParsed.problems.join("; ") : "all feeds fine"}` },
+    !neaLastParsed ? notYet(3600_000, "Hourly NEA check")
+      : { name: "Hourly NEA check", level: now - neaLastParsed.at > 2.5 * 3600_000 ? "fail" : neaLastParsed.problems.length ? "warn" : "ok",
+        detail: `last ran ${ago(neaLastParsed.at, now)}: ${neaLastParsed.problems.length ? neaLastParsed.problems.join("; ") : "all feeds fine"}` },
     { name: "NEA alert", level: neaAlerted ? "fail" : neaSince ? "warn" : "ok",
       detail: neaAlerted ? `issue opened ${ago(Number(neaAlerted), now)}; problem since ${ago(Number(neaSince), now)}`
         : neaSince ? `a problem started ${ago(Number(neaSince), now)}; an issue opens if it lasts an hour` : "no open problem" },
-    { name: "Freshness check (every 6 h)", level: !freshLast ? "warn" : now - Number(freshLast) > 7 * 3600_000 ? "fail" : "ok",
-      detail: freshLast ? `last ran ${ago(Number(freshLast), now)}${lastDispatch ? `; last asked for a rebuild ${ago(Number(lastDispatch), now)}` : ""}` : "no run recorded yet" },
+    !freshLast ? notYet(6 * 3600_000, "Freshness check (every 6 h)")
+      : { name: "Freshness check (every 6 h)", level: now - Number(freshLast) > 7 * 3600_000 ? "fail" : "ok",
+        detail: `last ran ${ago(Number(freshLast), now)}${lastDispatch ? `; last asked for a rebuild ${ago(Number(lastDispatch), now)}` : ""}` },
   ];
 
   const sections = [
     { title: "Data", checks: data },
-    { title: "NEA weather feeds", note: "Fetched live now. Rain, lightning and UV are often empty; for them the reply's format and time are checked.", checks: nea },
+    { title: "NEA weather feeds", note: "Read through the same 2-minute cache the weather card uses, so this page adds no load on data.gov.sg (12 requests per 10 s with a development key, 30 with a production key). Rain, lightning and UV are often empty; for them the reply's format and time are checked.", checks: nea },
     { title: "Other services", checks: services },
     { title: "Keys and tokens", checks: keys },
     { title: "Scheduled jobs", checks: jobs },
@@ -878,7 +897,7 @@ export default {
   },
   async scheduled(event, baseEnv, ctx) {
     const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
-    if (event.cron === NEA_CRON) ctx.waitUntil(checkNea(env).catch((e) => console.error("NEA check failed:", String(e))));
+    if (event.cron === NEA_CRON) ctx.waitUntil(checkNea(env, ctx).catch((e) => console.error("NEA check failed:", String(e))));
     else ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
   },
 } satisfies ExportedHandler<Env>;
@@ -923,7 +942,7 @@ async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url
         if (env.API_LIMIT && !(await env.API_LIMIT.limit({ key: request.headers.get("cf-connecting-ip") ?? "unknown" })).success) {
           return new Response("too many requests, slow down", { status: 429, headers: { "retry-after": "60" } });
         }
-        const report = await statusReport(env);
+        const report = await statusReport(env, ctx);
         const res = url.pathname === "/status.json"
           ? new Response(JSON.stringify(report, null, 1), { headers: { "content-type": "application/json; charset=utf-8" } })
           : new Response(renderStatus(report), { headers: { "content-type": "text/html; charset=utf-8" } });

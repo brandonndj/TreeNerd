@@ -32,11 +32,14 @@
   // Keep error logs, but not per-request logs: request URLs can contain a visitor's (rounded) location.
   "observability": { "enabled": true, "logs": { "invocation_logs": false } },
   "placement": { "mode": "smart" },
+  // when this version was deployed: /status uses it to tell "not run yet" from "overdue"
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "env": {
     // Local integration tests only (npm run test:e2e): never deployed. Same bindings, but a rate
     // limit high enough that a fast test run isn't refused.
     "e2e": {
       "triggers": { "crons": [] },
+      "version_metadata": { "binding": "CF_VERSION_METADATA" },
       "d1_databases": [
         { "binding": "DB_A", "database_name": "trees" },
         { "binding": "DB_B", "database_name": "trees-b" }
@@ -49,6 +52,7 @@
     // Reads the same data as production (the app never writes) and has no scheduled refresh.
     "dev": {
       "routes": [{ "pattern": "dev.treenerd.fyi", "custom_domain": true }],
+      "version_metadata": { "binding": "CF_VERSION_METADATA" },
       "triggers": { "crons": [] },
       "d1_databases": [
         { "binding": "DB_A", "database_name": "trees" },

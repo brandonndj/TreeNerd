@@ -2,6 +2,14 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-25: Steadier weather readings
+
+### Fixed
+- A weather reading, such as air quality, could briefly drop out of the card when NEA's service was asked too often. The site now asks NEA less often and waits briefly when NEA asks it to slow down.
+
+### Internal
+- Everything that reads NEA (the weather card, the hourly check and `/status`) shares one 2-minute edge cache; an NEA refusal (HTTP 429) or error is cached for 20 seconds so callers back off. `/status` shows a 429 as a warning, says when each feed was last fetched, and no longer flags a scheduled job that simply hasn't run since the last deploy or data update (deploy time from the new `CF_VERSION_METADATA` binding).
+
 ## 2026-11-24: Weather now, and colours for colour-blind visitors
 
 ### Added

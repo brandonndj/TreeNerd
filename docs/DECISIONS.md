@@ -75,6 +75,12 @@ says where distances are measured from.
 100 m) so answers can be cached and a visitor's exact position never leaves the browser. Showing "640 m"
 would claim more precision than that.
 
+**One shared NEA cache, and backing off when refused.** data.gov.sg allows 12 real-time requests per
+10 seconds with a development key (30 with a production key), and a weather card needs 7. When `/status`
+fetched NEA directly, two open status tabs and a few visitors were enough to be refused. Now everything
+reads through one 2-minute cache per data centre, and a refusal is remembered for 20 seconds so nothing
+keeps asking. A production key would give more room.
+
 **A feed that stops working is reported, not just hidden.** Hiding a reading keeps the page right, but
 without an alert a broken feed could go unnoticed for weeks. The Worker checks every feed hourly and,
 after an hour of trouble, opens a GitHub issue (at most one reminder a day), closing it on recovery.
@@ -122,8 +128,8 @@ API answers are keyed to the build. Live weather is cached for a minute and neve
 **Tests run on their own Worker environment**, with a rate limit a fast test run can't hit, and on
 WebKit (macOS) as well as Chromium, because most visitors use Safari on iOS.
 
-**One page shows whether every dependency works.** `/status` runs live checks on load (reused for 30
-seconds, rate-limited like the API) and reads when the scheduled jobs last ran. It shows whether each
+**One page shows whether every dependency works.** `/status` checks the other services live on load (reused
+for 30 seconds, rate-limited like the API), but reads NEA through the weather card's shared cache and reads when the scheduled jobs last ran. It shows whether each
 secret is set and accepted, never its value. The jobs record their last run in the live database's meta
 table (about 840 rows a month); that history starts again after each weekly update, which replaces the
 database. It isn't linked or indexed; Cloudflare Access is what actually keeps it private.
