@@ -593,9 +593,11 @@ function setSheet(mode) {
     panel.hidden ? "0px" : `${panel.getBoundingClientRect().height}px`));
   if (mode !== "full") panel.scrollTop = 0;
 }
+// a divider under the pinned title once the content has scrolled beneath it
+panel.addEventListener("scroll", () => panel.classList.toggle("scrolled", panel.scrollTop > 4), { passive: true });
 function openPanel(html, { sheet } = {}) {
   const wasHidden = panel.hidden;
-  body.innerHTML = html; panel.hidden = false; panel.scrollTop = 0;
+  body.innerHTML = html; panel.hidden = false; panel.scrollTop = 0; panel.classList.remove("scrolled");
   document.body.classList.add("panel-open");
   if (isPhone() && (wasHidden || sheet || state.sheet === "peek")) setSheet(sheet || "half");
   requestAnimationFrame(() => map.triggerRepaint()); // some GPUs leave a stale canvas under new overlays
@@ -910,24 +912,24 @@ async function openTree(id, fly = true, keepContext = false) {
   const s = t.species || {};
   const cat = CATS.find((c) => c.key === t.category) || CATS.at(-1);
   const P = t.places || {};
-  const placeLink = (kind) => P[kind] ? `<button class="linkish" data-kind="${kind}" data-slug="${esc(P[kind].slug)}">${esc(P[kind].name)}</button>` : null;
+  // Where the tree is: one tappable row per place (a full-width 44-point target), so the facts above stay compact
+  const whereRow = (label, kind, slug, name, meta = "", id = "") => `<li><button data-kind="${kind}" data-slug="${esc(slug)}"${id ? ` id="${id}"` : ""}>
+    <span class="w-k">${label}</span><span class="w-v">${esc(name)}${meta ? ` <span class="muted">· ${meta}</span>` : ""}</span><span class="chev" aria-hidden="true">›</span></button></li>`;
+  const plainRow = (label, value) => `<li><div><span class="w-k">${label}</span><span class="w-v">${esc(value)}</span></div></li>`;
+  const where = [
+    ...[["Road", "road"], ["Park", "park"], ["Park connector", "pcn"]].filter(([, k]) => P[k])
+      .map(([label, k]) => whereRow(label, k, P[k].slug, P[k].name, k === "road" && t.road_dist != null ? `${Math.round(t.road_dist)} m away` : "")),
+    ...(t.nature_way ? [plainRow("Nature Way", t.nature_way)] : []),
+    ...[["Subzone", "subzone"], ["Planning area", "planning_area"], ["Constituency", "constituency"], ["Heritage road", "heritage_road"]]
+      .filter(([, k]) => P[k]).map(([label, k]) => whereRow(label, k, P[k].slug, P[k].name)),
+    ...(t.tca ? [hasAreas() ? whereRow("Conservation area", "tca", slugify(t.tca), t.tca, "", "tca-link") : plainRow("Conservation area", t.tca)] : []),
+  ];
   const rows = [
     ["Girth", t.girth_m ? `${t.girth_m.toFixed(2)} m <span class="muted">(≈${Math.round((t.girth_m / Math.PI) * 100)} cm diameter)</span>${t.measure_flag ? " ⚠" : ""}` : esc(t.girth_band)],
     ["Height", t.height_band ? `${esc(t.height_band)} m${t.measure_flag ? " ⚠" : ""}` : null],
     ["Age", t.age != null && t.age >= 0 ? `~${Number(t.age)} years` : null],
     ["Planted", esc(t.date_planted)],
     ["Carbon", t.carbon_kg ? `~${tonnes(t.carbon_kg)} <span class="muted">(estimate)</span>` : CARBON_SKIP[t.carbon_skip] ? `<span class="muted">Not estimated: ${CARBON_SKIP[t.carbon_skip]}</span>` : null],
-    ["Road", placeLink("road") && `${placeLink("road")}${t.road_dist != null ? ` <span class="muted">· ${Math.round(t.road_dist)} m</span>` : ""}`],
-    ["Park", placeLink("park")],
-    ["Park connector", placeLink("pcn")],
-    ["Nature Way", esc(t.nature_way)],
-    ["Subzone", placeLink("subzone")],
-    ["Planning area", placeLink("planning_area")],
-    ["Constituency", placeLink("constituency")],
-    ["Heritage road", placeLink("heritage_road")],
-    ["Conservation", t.tca ? (hasAreas()
-      ? `In <button class="linkish" id="tca-link" data-slug="${esc(slugify(t.tca))}">${esc(t.tca)}</button><br><span class="muted">${esc(TCA_RULE.replace("Inside a Tree Conservation Area, cutting any tree", "Cutting a tree here"))}</span>`
-      : `In ${esc(t.tca)}`) : null],
     ["Land use", esc(t.land_use)],
     ["Tree ID", `${Number(t.id)}`],
     ["Updated", esc(t.last_edited)],
@@ -943,6 +945,8 @@ async function openTree(id, fly = true, keepContext = false) {
     ${t.measure_flag ? `<div class="callout warn">⚠ <b>Possible recording error.</b> The recorded girth (${Number(t.girth_m).toFixed(1)} m) and height (${esc(t.height_band)} m) can't both be right: the trunk would be wider than the tree is plausibly tall. One of them is probably mis-recorded in the source data, so no carbon estimate is shown.</div>` : ""}
     <h3>Details</h3>
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    ${where.length ? `<h3>Location</h3><ul class="where">${where.join("")}</ul>` : ""}
+    ${t.tca ? `<p class="note">${esc(TCA_RULE.replace("Inside a Tree Conservation Area, cutting any tree", "Cutting a tree in this area"))}</p>` : ""}
     <div class="actions">
       ${s.id ? `<button class="btn" id="sp">All ${esc(s.common || s.scientific)} trees</button>` : ""}
       ${safeUrl(s.ffw_url) ? `<a class="btn" href="${esc(safeUrl(s.ffw_url))}" target="_blank" rel="noopener noreferrer">Flora &amp; Fauna Web ↗</a>` : ""}
@@ -955,7 +959,6 @@ async function openTree(id, fly = true, keepContext = false) {
   showWeather(Number(t.lat), Number(t.lng), "this tree");
   $("#back")?.addEventListener("click", () => state.place ? renderPlace(state.place) : openSpecies(state.species.id, false));
   $("#sp")?.addEventListener("click", () => openSpecies(s.id));
-  $("#tca-link")?.addEventListener("click", (e) => openPlace("tca", e.currentTarget.dataset.slug));
   $("#share").addEventListener("click", share);
   body.querySelectorAll("button[data-kind]").forEach((b) => b.addEventListener("click", () => openPlace(b.dataset.kind, b.dataset.slug)));
 }

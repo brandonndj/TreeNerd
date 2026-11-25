@@ -284,6 +284,32 @@ test("weather card: every reading names where it's from, lightning first, nothin
   await t.ctx.close();
 });
 
+test("tree page: title and close button stay in view while scrolling; places are one tappable row each", async () => {
+  for (const device of ["iPhone 15 Pro", "iPad Mini"]) {
+    const { ctx, page, errors } = await open("/?t=10687021", { ...devices[device], deviceScaleFactor: 1 });
+    await page.waitForSelector(".where");
+    if (device.startsWith("iPhone")) await page.tap("#handle"); // full sheet, so the panel can scroll
+    await page.waitForTimeout(400);
+    const at = () => page.evaluate(() => {
+      const p = document.querySelector("#panel").getBoundingClientRect(), x = document.querySelector("#close").getBoundingClientRect();
+      const h = document.querySelector("#panel-body h2").getBoundingClientRect();
+      return { xIn: x.top >= p.top - 1 && x.bottom <= p.bottom, hIn: h.top >= p.top - 1 && h.top < p.top + 120,
+        xBesideTitle: Math.abs((x.top + x.bottom) / 2 - (h.top + h.bottom) / 2) < 16 };
+    });
+    const before = await at();
+    await page.evaluate(() => { document.querySelector("#panel").scrollTop = 400; });
+    await page.waitForTimeout(200);
+    const after = await at();
+    assert.ok(before.xIn && before.hIn && before.xBesideTitle, `${device} before: ${JSON.stringify(before)}`);
+    assert.ok(after.xIn && after.hIn && after.xBesideTitle, `${device} after scrolling: ${JSON.stringify(after)}`);
+    assert.equal(await page.evaluate(() => document.querySelector("#panel").classList.contains("scrolled")), true);
+    const rows = await page.$$eval(".where li > button", (bs) => bs.map((b) => ({ h: b.getBoundingClientRect().height, kind: b.dataset.kind })));
+    assert.ok(rows.length >= 3 && rows.every((r) => r.h >= 43.5 && r.kind), JSON.stringify(rows));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+});
+
 test("Tree Conservation Area: its page, NParks' rule, the outline, and the link from a tree inside it", async () => {
   const api = await (await fetch(`${B}/api/place/tca/central-tree-conservation-area`)).json();
   const outlines = [];
@@ -305,7 +331,7 @@ test("Tree Conservation Area: its page, NParks' rule, the outline, and the link 
   // a tree inside it links to the page and states the rule
   const t = await open("/?t=10687021");
   await t.page.waitForSelector("#tca-link");
-  assert.match(await t.page.textContent("#panel-body"), /Cutting a tree here with a girth of more than 1 m, measured 1 m above the ground, needs written approval from NParks/);
+  assert.match(await t.page.textContent("#panel-body"), /Cutting a tree in this area with a girth of more than 1 m, measured 1 m above the ground, needs written approval from NParks/);
   await t.page.click("#tca-link");
   await panelTitle(t.page, "Central Tree Conservation Area");
   assert.match(t.page.url(), /p=tca(%2F|\/)central-tree-conservation-area/);
@@ -341,7 +367,7 @@ test("Tree Conservation Areas switch: outlines on the map, kept in the link, unt
   await o.page.waitForSelector("#panel-body h2");
   assert.equal(await o.page.$("#legend-tca"), null);
   assert.equal(await o.page.$("#tca-link"), null);
-  assert.match(await o.page.textContent("#panel-body"), /In Central Tree Conservation Area/);
+  assert.match(await o.page.textContent("#panel-body"), /Conservation area\s*Central Tree Conservation Area/);
   await o.ctx.close();
 });
 

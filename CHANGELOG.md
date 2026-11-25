@@ -10,6 +10,8 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 - A tree inside one of the areas now links to that area's page and states the rule.
 
 ### Changed
+- Tree pages are neater: the details are evenly and closely spaced, and the road, park and areas a tree is in are listed under "Location" as rows you tap to open.
+- The title and the close button (X) stay at the top of the panel while you scroll, so you can always close it without scrolling back up.
 - The About panel explains that the "Conservation" tree type is NParks' own record of conservation trees, mostly in nature parks and reserves, and isn't the same as the Tree Conservation Areas.
 
 ### Internal
