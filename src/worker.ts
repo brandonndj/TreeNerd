@@ -9,7 +9,7 @@
 import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
 import { serveTiles } from "./tiles";
-import { FEEDS, type Feed, air, forecast, heat, lightning, rain, temperature, uv } from "./weather";
+import { FEEDS, type Feed, air, feedProblems, forecast, heat, lightning, rain, temperature, uv } from "./weather";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
@@ -24,6 +24,7 @@ export interface Env {
   GITHUB_REF: string;
   ARCGIS_TREES_LAYER: string;
   GITHUB_TOKEN?: string;
+  DATAGOVSG_API_KEY?: string; // optional secret: data.gov.sg key, sent with NEA requests for higher rate limits
   ONEMAP_EMAIL?: string; // optional secrets: OneMap account used for address search
   ONEMAP_PASSWORD?: string;
 }
@@ -468,12 +469,15 @@ async function apiTop(url: URL, env: Env) {
 
 // ---------------------------------------------------------------- live conditions (NEA)
 /** One NEA feed, from the edge cache (two minutes) or upstream; null if NEA can't be reached. */
-async function neaFeed(feed: Feed, ctx: ExecutionContext): Promise<unknown> {
+const neaHeaders = (env: Env): Record<string, string> => ({
+  "user-agent": "TreeNerd (+https://treenerd.fyi)", ...(env.DATAGOVSG_API_KEY ? { "x-api-key": env.DATAGOVSG_API_KEY } : {}),
+});
+async function neaFeed(feed: Feed, env: Env, ctx: ExecutionContext): Promise<unknown> {
   const cache = caches.default, key = new Request(FEEDS[feed]);
   let res = await cache.match(key);
   if (!res) {
     try {
-      const up = await fetch(FEEDS[feed], { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
+      const up = await fetch(FEEDS[feed], { headers: neaHeaders(env) });
       if (!up.ok) throw new Error(`NEA returned ${up.status}`);
       res = new Response(await up.text(), { headers: { "content-type": "application/json", "cache-control": "public, max-age=120" } });
       ctx.waitUntil(cache.put(key, res.clone()));
@@ -491,12 +495,12 @@ async function neaFeed(feed: Feed, ctx: ExecutionContext): Promise<unknown> {
  * has no fresh reading; one failing feed never hides the others. At most one upstream request per
  * feed every two minutes, whoever asks.
  */
-async function apiWeather(url: URL, ctx: ExecutionContext) {
+async function apiWeather(url: URL, env: Env, ctx: ExecutionContext) {
   const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
   if (!(lat > 1.1 && lat < 1.5 && lng > 103.5 && lng < 104.2)) throw new HttpError(400, "location must be in Singapore");
   const names = Object.keys(FEEDS) as Feed[];
   const feeds = Object.fromEntries(names.map((f, i) => [f, i])) as Record<Feed, number>;
-  const got = await Promise.all(names.map((f) => neaFeed(f, ctx)));
+  const got = await Promise.all(names.map((f) => neaFeed(f, env, ctx)));
   const now = Date.now(), d = (f: Feed) => got[feeds[f]];
   const safe = <T>(fn: () => T) => { try { return fn(); } catch (e) { console.error("NEA parse:", String(e)); return null; } };
   const body = {
@@ -571,7 +575,7 @@ async function api(env: Env, url: URL, ctx: ExecutionContext): Promise<Response>
   if (p[0] === "search") return apiSearch(url, env);
   if (p[0] === "near") return apiNear(url, env);
   if (p[0] === "top") return apiTop(url, env);
-  if (p[0] === "weather" && p.length === 1) return apiWeather(url, ctx);
+  if (p[0] === "weather" && p.length === 1) return apiWeather(url, env, ctx);
   if (p[0] === "changes" && p.length === 1) return apiChanges(env);
   if (p[0] === "geocode") return apiGeocode(url, env);
   if (p[0] === "tree" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiTree(env, Number(p[1]));
@@ -680,6 +684,59 @@ async function checkForNewData(env: Env) {
   }
 }
 
+// ---------------------------------------------------------------- cron: NEA feed check
+const NEA_CRON = "43 * * * *";
+const NEA_ALERT_AFTER = 3600_000; // a problem must last this long: NEA has brief gaps
+const NEA_ALERT_EVERY = 24 * 3600_000; // while it lasts, remind at most once a day
+/**
+ * Hourly: fetch every NEA feed and check it still gives what the weather card needs (feedProblems).
+ * A problem lasting over an hour runs the "NEA feed alert" workflow, which opens an issue; recovery
+ * runs it again to close the issue. State is two rows in the meta table, written only when it changes.
+ * Cost: 7 requests an hour to NEA; no database writes while all is well.
+ */
+async function checkNea(env: Env) {
+  const names = Object.keys(FEEDS) as Feed[];
+  const got = await Promise.all(names.map(async (f) => {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const r = await fetch(FEEDS[f], { headers: neaHeaders(env) });
+        if (r.ok) return [f, await r.json()] as const;
+      } catch { /* try once more */ }
+    }
+    return [f, null] as const;
+  }));
+  const problems = feedProblems(Object.fromEntries(got), Date.now());
+  const get = async (k: string) => (await env.DB.prepare("SELECT value FROM meta WHERE key=?").bind(k).first<{ value: string }>().catch(() => null))?.value;
+  const put = (k: string, v: string | null) => (v === null
+    ? env.DB.prepare("DELETE FROM meta WHERE key=?").bind(k) : env.DB.prepare("INSERT OR REPLACE INTO meta VALUES (?, ?)").bind(k, v)).run();
+  const since = Number(await get("nea_problem_since") ?? 0), alerted = Number(await get("nea_alerted_at") ?? 0);
+  if (!problems.length) {
+    if (since) await put("nea_problem_since", null);
+    if (alerted) {
+      console.log("NEA feeds have recovered");
+      if (await dispatchNeaAlert(env, "recovered", "All NEA feeds give readings again.")) await put("nea_alerted_at", null);
+    }
+    return;
+  }
+  console.error("NEA feed problem:", problems.join("; "));
+  if (!since) return void await put("nea_problem_since", String(Date.now()));
+  if (Date.now() - since < NEA_ALERT_AFTER || Date.now() - alerted < NEA_ALERT_EVERY) return;
+  const hours = Math.round((Date.now() - since) / 3600_000);
+  if (await dispatchNeaAlert(env, "problem", `For about ${hours} h: ${problems.join("; ")}`)) await put("nea_alerted_at", String(Date.now()));
+}
+
+async function dispatchNeaAlert(env: Env, status: "problem" | "recovered", details: string) {
+  if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) { console.warn("NEA alert not sent: GITHUB_TOKEN is not set"); return false; }
+  const gh = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/nea-alert.yml/dispatches`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json",
+      "user-agent": "TreeNerd (+https://treenerd.fyi)", "content-type": "application/json" },
+    body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { status, details: details.slice(0, 900) } }),
+  });
+  console.log(`NEA alert (${status}) sent:`, gh.status);
+  return gh.ok;
+}
+
 // ---------------------------------------------------------------- entry
 export default {
   async fetch(request, baseEnv, ctx): Promise<Response> {
@@ -690,9 +747,10 @@ export default {
     }
     return noIndex(await handle(request, baseEnv, ctx, url));
   },
-  async scheduled(_event, baseEnv, ctx) {
+  async scheduled(event, baseEnv, ctx) {
     const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
-    ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
+    if (event.cron === NEA_CRON) ctx.waitUntil(checkNea(env).catch((e) => console.error("NEA check failed:", String(e))));
+    else ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -736,7 +794,7 @@ async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url
       if (url.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
         // the app shell, with a title/description matching the shared link (?p= / ?s= / ?t=)
         const shell = await env.ASSETS.fetch(new Request(new URL("/", url), request));
-        const res = withMeta(new Response(shell.body, shell), await pageMeta(env.DB, url));
+        const res = withMeta(new Response(shell.body, shell), await pageMeta(env.DB, url, Number((await getMeta(env))?.tree_count) || null));
         const out = new Response(res.body, res);
         for (const [k, v] of Object.entries(PAGE_HEADERS)) out.headers.set(k, v);
         out.headers.set("cache-control", "public, max-age=0, must-revalidate");

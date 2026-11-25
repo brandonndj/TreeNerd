@@ -1,8 +1,8 @@
 # 🌳 TreeNerd
 
-**[treenerd.fyi](https://treenerd.fyi)**: explore every tree in Singapore.
+**[treenerd.fyi](https://treenerd.fyi)**: explore the trees NParks records in Singapore.
 
-TreeNerd maps every tree NParks records in Singapore (889,678 at the 22 November 2026 update) and makes them searchable by **road**, **park**, **planning area**, **subzone**, **park connector**, **constituency**, **MRT station**, **address** or **species**. Pick a place to see how many trees it has, which species dominate, how much carbon they store, and its largest trees. Pick any tree to see its details.
+TreeNerd maps the trees NParks records in Singapore (889,678 at the 22 November 2026 update; forest trees, such as those in the nature reserves, aren't recorded one by one) and makes them searchable by **road**, **park**, **planning area**, **subzone**, **park connector**, **constituency**, **MRT station**, **address** or **species**. Pick a place to see how many trees it has, which species dominate, how much carbon they store, and its largest trees. Pick any tree to see its details.
 
 ![TreeNerd showing the trees of Orchard Road](docs/screenshot.jpg)
 
@@ -104,7 +104,7 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 | `/data/trails.geojson` | The trail routes, for drawing on a map |
 | `/api/changes` | Trees recently added or removed |
 | `/api/health` | 200 when everything is present and the data is fresh, otherwise 503 |
-| `/data/trees.csv.gz` | Every tree, as one CSV |
+| `/data/trees.csv.gz` | All the recorded trees, as one CSV |
 
 ## Methodology
 
@@ -132,7 +132,7 @@ Percentages below are from the 22 November 2026 update and move a little each we
 - **Stations**: an MRT or LRT station is the centre of its exits; its tree count is the trees within 250 m.
 - **Trails** count the trees within 15 m of the route. A tree can be on several. Nature reserve trails aren't listed: the inventory records managed trees, not the forest, so their counts would be misleadingly small.
 - **Trees per resident** uses the 2020 census, which counts residents only, so business and industrial areas score high. Areas with under 1,000 residents get no figure.
-- **Weather** comes live from NEA's real-time feeds on data.gov.sg (`src/weather.ts`, tested in `tests/weather.test.mjs`). Each reading is shown with where it's from and when, and is dropped once it's older than its feed's normal interval allows:
+- **Weather** is shown on tree pages, parks, planning areas, subzones and roads up to 3 km across (measured from the middle of the place's bounding box), and around any spot. Trails, park connectors, constituencies and longer roads get none, since one reading can't describe them. Distances under 1 km are shown to the nearest 100 m, because the point sent is rounded to about 100 m. It comes live from NEA's real-time feeds on data.gov.sg (`src/weather.ts`, tested in `tests/weather.test.mjs`). Each reading is shown with where it's from and when, and is dropped once it's older than its feed's normal interval allows:
   - *Air temperature*: nearest station, under 30 minutes old.
   - *Heat stress*: wet-bulb globe temperature at the nearest station, with NEA's own rating (Low, Moderate, High); under 45 minutes old.
   - *2-hour forecast*: NEA's forecast for the forecast area whose centre is nearest, shown only while it's valid.
@@ -141,7 +141,7 @@ Percentages below are from the 22 November 2026 update and move a little each we
   - *UV index*: NEA's single hourly reading for Singapore, measured at Changi, with the WHO exposure category (Low 0-2, Moderate 3-5, High 6-7, Very high 8-10, Extreme 11+); not shown when it's 0 or over 2.5 hours old.
   - *PM2.5*: the 1-hour reading for the NEA region (north, south, east, west, central) whose centre is nearest, with NEA's band (Normal up to 55 µg/m³, Elevated 56-150, High 151-250, Very high above 250) and NEA's advice for that band; under 2 hours old. The region is named, since NEA doesn't publish the regions' boundaries in this feed.
 
-  None of these measures how much trees cool a place. Each feed is fetched at most once every two minutes and never stored, so they add no database cost.
+  None of these measures how much trees cool a place. Each feed is fetched at most once every two minutes and never stored, so they add no database cost. An hourly check (`checkNea` in `src/worker.ts`) confirms every feed still gives what the card needs; a problem lasting over an hour opens a GitHub issue through the *NEA feed alert* workflow, and recovery closes it. The Worker sends the optional `DATAGOVSG_API_KEY` secret with NEA requests if it's set.
 - **Amenities** are named by their type; NParks' own labels are shown as the description.
 - **Freshness**: the data is rebuilt once a week. The app shows the date of the last update, and says so if an update is overdue.
 

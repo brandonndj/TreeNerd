@@ -21,7 +21,8 @@
   "r2_buckets": [{ "binding": "DATA", "bucket_name": "trees-data" }],
   // Per-IP limit on /api/* requests.
   "ratelimits": [{ "name": "API_LIMIT", "namespace_id": "1001", "simple": { "limit": 300, "period": 60 } }],
-  "triggers": { "crons": ["17 */6 * * *"] },
+  // every 6 h: is the weekly data update overdue? hourly at :43: are NEA's weather feeds still working?
+  "triggers": { "crons": ["17 */6 * * *", "43 * * * *"] },
   "vars": {
     "GITHUB_REPO": "brandonndj/TreeNerd",
     "GITHUB_WORKFLOW": "data.yml",

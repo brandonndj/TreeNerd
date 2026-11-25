@@ -270,7 +270,7 @@ test("weather card: every reading names where it's from, lightning first, nothin
     assert.ok(card.fits && !card.wide && card.sticksOut === 0, `${device}: ${JSON.stringify(card)}`);
     assert.match(card.rows[0], /Lightning 3\.5 km away .*cloud to ground, 4 strikes within 10 km/);
     const all = card.rows.join(" | ");
-    for (const re of [/Raining now 0\.4 mm in 5 min · Orchard Road Exchange Building rain gauge, 640 m/, /Next 2 hours Thundery Showers · Tanglin area, until/,
+    for (const re of [/Raining now 0\.4 mm in 5 min · Orchard Road Exchange Building rain gauge, 600 m/, /Next 2 hours Thundery Showers · Tanglin area, until/,
       /Heat stress Moderate \(WBGT 31\.2 °C\) · Hong Lim Park, 2\.3 km/, /UV index 9 very high · measured at Changi/,
       /Air \(PM2\.5\) 72 µg\/m³ elevated · NEA central region/, /reduce strenuous outdoor activities for the next hour.*\(NEA\)/]) assert.match(all, re, device);
     assert.deepEqual(errors, []);
@@ -282,6 +282,50 @@ test("weather card: every reading names where it's from, lightning first, nothin
   assert.equal(await t.page.$(".weather-temp"), null);
   assert.equal(await t.page.getAttribute("#weather", "data-band"), "none");
   await t.ctx.close();
+});
+
+test("weather card: on trees, areas, subzones, parks and short roads; never on trails or long roads", async () => {
+  const pages = [["/?t=10687021", "this tree"], ["/?p=subzone/ntsz06", "the middle of the subzone"],
+    ["/?p=planning_area/newton", "the middle of the area"], ["/?p=road/orchard-road", "the middle of the road"]];
+  for (const [path, from] of pages) {
+    const { ctx, page, errors } = await open(path, undefined, B, fullWeather);
+    await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+    assert.match(await page.textContent("#weather .weather-note"), new RegExp(`distances are from ${from}\\.`), path);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  const trail = await open("/?p=trail/central-cycling-paths", undefined, B, fullWeather);
+  await panelTitle(trail.page, "Central cycling paths");
+  assert.equal(await trail.page.$("#weather"), null, "a route has no single place to measure from");
+  await trail.ctx.close();
+  // a road more than 3 km across: no card (its place reply is stretched to 5 km)
+  const long = await open("/?p=road/orchard-road", undefined, B, async (c) => {
+    await fullWeather(c);
+    await c.route("**/api/place/road/orchard-road*", async (r) => {
+      const res = await r.fetch(), d = await res.json();
+      d.bbox = [103.80, 1.300, 103.845, 1.300]; // about 5 km east to west
+      await r.fulfill({ response: res, json: d });
+    });
+  });
+  await panelTitle(long.page, "Orchard Road");
+  await long.page.waitForTimeout(500);
+  assert.equal(await long.page.$("#weather"), null);
+  await long.ctx.close();
+});
+
+test("weather card: a slow reply for a page that's been left isn't shown on the next one", async () => {
+  let first = true;
+  const { ctx, page, errors } = await open("/?p=subzone/ntsz06", undefined, B, (c) => c.route("**/api/weather*", async (r) => {
+    if (first) { first = false; await new Promise((ok) => setTimeout(ok, 2500)); return r.fulfill({ json: { ...FULL_WEATHER(), reading: { ...FULL_WEATHER().reading, station: "Old Place" } } }); }
+    return r.fulfill({ json: { ...FULL_WEATHER(), reading: { ...FULL_WEATHER().reading, station: "New Place" } } });
+  }));
+  await page.waitForSelector("#tree-list button");
+  await page.click("#tree-list button"); // open a tree while the subzone's reply is still coming
+  await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+  await page.waitForTimeout(3000);
+  assert.doesNotMatch(await page.textContent("#weather"), /Old Place/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
 });
 
 test("temperature card: shown near the top with station and distance, hidden without a fresh reading", async () => {
@@ -468,7 +512,7 @@ for (const [label, device] of IOS) {
       // the weather card at its fullest, so its rows are measured too
       const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
       if (path !== "/") await page.waitForSelector("#panel-body h2");
-      if (path.startsWith("/?near")) await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+      if (await page.$("#weather")) await page.waitForSelector("#weather:not([hidden]) .wx-rows");
       else { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
       const report = await page.evaluate(() => {
         const shown = (e) => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);

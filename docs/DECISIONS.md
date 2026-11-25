@@ -6,6 +6,9 @@ README's Methodology. Add an entry when you make a choice someone might later qu
 
 ## Data and accuracy
 
+**Never "every tree".** NParks records managed trees, not the forest, so the site says how many trees
+NParks records (the live count) and that forest trees aren't included. The link-preview image carries no count.
+
 **No figure is written into the code or the page text.** Counts (trees, stations, roads with stories)
 come from the build and are shown from `/api/meta` or the database. The method's limits (road distance,
 trail distance, census year, minimum residents, carbon limit, MRT radius) are published by each build in
@@ -62,6 +65,21 @@ at most every two minutes, so there is no database cost.
 | 24-hour PSI | Lags; replaced by 1-hour PM2.5 (owner's choice). |
 | 24-hour and 4-day forecasts, radar | Not about the spot, and heavy on phones. |
 | Flood alerts | About drains and roads, not trees. |
+
+**Where the card appears.** Trees, parks, planning areas, subzones and roads up to 3 km across (from
+the middle of the place's bounding box), and around any spot. Not on trails, park connectors (owner's
+choice), constituencies or longer roads: one reading can't describe somewhere several km long. The card
+says where distances are measured from.
+
+**Distances under 1 km are shown to the nearest 100 m.** The point sent is rounded to 0.001° (about
+100 m) so answers can be cached and a visitor's exact position never leaves the browser. Showing "640 m"
+would claim more precision than that.
+
+**A feed that stops working is reported, not just hidden.** Hiding a reading keeps the page right, but
+without an alert a broken feed could go unnoticed for weeks. The Worker checks every feed hourly and,
+after an hour of trouble, opens a GitHub issue (at most one reminder a day), closing it on recovery.
+Brief gaps don't alert. *Cost:* 7 requests an hour to NEA, and database writes only when the state
+changes.
 
 **Temperature colours follow Singapore's scale**, from NEA's 2024 readings (6.9 million, all stations):
 under 26 °C is the coolest 5%, 26-29 a typical night or morning, 29-31 a typical day, 31-33 a hot

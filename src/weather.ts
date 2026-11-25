@@ -142,3 +142,31 @@ export function air(d: Json, lat: number, lng: number, now: number) {
   const pm25 = num(values[near.item.name]), b = PM25_BANDS.find((x) => Math.round(pm25) <= x.max)!;
   return { pm25, band: b.band, advice: b.advice, region: String(near.item.name), at: String(item.timestamp) };
 }
+
+// ------------------------------------------------------------------ feed health (the hourly NEA check)
+/** A point in the middle of Singapore, used to check each feed still gives a reading. */
+export const CHECK_POINT: [number, number] = [1.3521, 103.8198];
+/**
+ * What's wrong with NEA's feeds right now, as plain sentences (empty when all is well). Feeds that
+ * always have a reading must give one; rain, lightning and UV are often legitimately empty, so for them
+ * the response's shape and timestamp are checked instead. A format change NEA makes shows up here.
+ */
+export function feedProblems(feeds: Partial<Record<Feed, Json>>, now: number): string[] {
+  const [lat, lng] = CHECK_POINT, out: string[] = [];
+  const need = (feed: Feed, ok: unknown, what: string) => { if (!ok) out.push(`${feed}: ${feeds[feed] == null ? "NEA could not be reached" : what}`); };
+  need("temperature", temperature(feeds.temperature, lat, lng, now), "no reading under 30 minutes old");
+  need("heat", heat(feeds.heat, lat, lng, now), "no heat stress reading under 45 minutes old");
+  need("forecast", forecast(feeds.forecast, lat, lng, now), "no forecast valid now");
+  need("air", air(feeds.air, lat, lng, now), "no PM2.5 reading under 2 hours old");
+  const r = feeds.rain?.data;
+  need("rain", fresh(r?.readings?.[0]?.timestamp, now, MAX_AGE.rain) && Array.isArray(r?.stations) && r.stations.length > 0,
+    "no rain gauge readings under 20 minutes old");
+  const l = feeds.lightning?.data?.records?.[0];
+  need("lightning", fresh(l?.updatedTimestamp ?? l?.datetime, now, MAX_AGE.lightning) && Array.isArray(l?.item?.readings),
+    "no lightning report in the last 15 minutes");
+  const hours = feeds.uv?.data?.records?.[0]?.index;
+  const sgHour = new Date(now + 8 * 3600_000).getUTCHours(); // NEA measures UV from 7 am to 7 pm
+  need("uv", Array.isArray(hours) && hours.every((h: Json) => Number.isFinite(num(h?.value)))
+    && (sgHour < 10 || sgHour >= 19 || hours.some((h: Json) => fresh(h?.hour, now, MAX_AGE.uv))), "no UV reading in the last 2.5 hours of daylight");
+  return out;
+}

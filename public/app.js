@@ -696,7 +696,7 @@ function renderPlace(d) {
       ${extra.trees_per_1000_residents != null ? statTile(fmt.format(extra.trees_per_1000_residents), "trees per 1,000 residents") : ""}
     </div>
     ${residentsNote(extra)}
-    ${d.kind === "park" ? WEATHER_SLOT : ""}
+    ${placeWeatherPoint(d) ? WEATHER_SLOT : ""}
     ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within ${M("trail_max_m")} m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
     ${extra.story ? `<h3>About this road</h3><p>${esc(extra.story)}</p><p class="note">From the ${esc(extra.story_source || "National Library Board")}.</p>` : ""}
 
@@ -724,7 +724,8 @@ function renderPlace(d) {
   $("#share").addEventListener("click", share);
   wireChangeRows();
   wirePoiRows(d.pois);
-  if (d.kind === "park" && d.bbox) showWeather((d.bbox[1] + d.bbox[3]) / 2, (d.bbox[0] + d.bbox[2]) / 2);
+  const wp = placeWeatherPoint(d);
+  if (wp) showWeather(wp.lat, wp.lng, wp.from);
   loadTreeList(d, 0);
   $("#more").addEventListener("click", () => loadTreeList(d, $("#tree-list").children.length));
 }
@@ -854,8 +855,10 @@ async function openTree(id, fly = true, keepContext = false) {
       <a class="btn" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${Number(t.lat)},${Number(t.lng)}" target="_blank" rel="noopener noreferrer">Street View ↗</a>
       <button class="btn" id="share">🔗 Share</button>
     </div>
+    ${WEATHER_SLOT}
     <p class="note">Carbon is an allometric estimate (Chave et al. 2014) from girth, height band and wood density${s.wood_density ? ` (${Number(s.wood_density).toFixed(2)} g/cm³, ${s.wood_density_src === "genus" ? "the average for its genus" : "for this species"})` : state.meta?.wood_density ? ` (${Number(state.meta.wood_density.default).toFixed(2)} g/cm³, the average across Singapore's trees)` : ""}.</p>`, { sheet: "half" });
   if (fly) map.easeTo({ center: [t.lng, t.lat], zoom: Math.max(map.getZoom(), 18), padding: panelPadding(), duration: 700 });
+  showWeather(Number(t.lat), Number(t.lng), "this tree");
   $("#back")?.addEventListener("click", () => state.place ? renderPlace(state.place) : openSpecies(state.species.id, false));
   $("#sp")?.addEventListener("click", () => openSpecies(s.id));
   $("#share").addEventListener("click", share);
@@ -923,7 +926,7 @@ async function nearby(lat, lng, r = 150, label = null) {
   body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
   $("#share").addEventListener("click", share);
   wirePoiRows(d.pois);
-  showWeather(lat, lng);
+  showWeather(lat, lng, "this spot");
 }
 
 // ---- points of interest in panels
@@ -958,6 +961,23 @@ function wirePoiRows(rows) {
   }));
 }
 
+// ---- which pages show live weather, and for which point (see docs/DECISIONS.md)
+// Places are measured from the middle of their bounding box. Long roads get no card: one reading can't
+// describe a road several km long. Trails, park connectors and constituencies never do, for the same reason.
+const WEATHER_MAX_EXTENT_KM = 3;
+const WEATHER_KINDS = { park: "the park", subzone: "the subzone", planning_area: "the area", road: "the road", heritage_road: "the road" };
+const bboxKm = (b) => haversineKm(b[1], b[0], b[3], b[2]);
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const r = Math.PI / 180, a = Math.sin((lat2 - lat1) * r / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lng2 - lng1) * r / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+/** The point a place's weather card is for, or null when it gets none. */
+function placeWeatherPoint(d) {
+  if (!WEATHER_KINDS[d.kind] || !Array.isArray(d.bbox) || d.bbox.length !== 4) return null;
+  if ((d.kind === "road" || d.kind === "heritage_road") && bboxKm(d.bbox) > WEATHER_MAX_EXTENT_KM) return null;
+  return { lat: (d.bbox[1] + d.bbox[3]) / 2, lng: (d.bbox[0] + d.bbox[2]) / 2, from: `the middle of ${WEATHER_KINDS[d.kind]}` };
+}
+
 // ---- the method's limits, as the live build used them (meta.method); defaults are for builds older than that
 const METHOD_DEFAULTS = { road_max_m: 30, trail_max_m: 15, station_radius_m: 250, carbon_max_diameter_cm: 212, min_residents: 1000, residents_year: 2020 };
 const METHOD = { ...METHOD_DEFAULTS };
@@ -975,19 +995,21 @@ const tempBand = (c) => TEMP_BANDS.find(([min]) => c >= min)[1];
 const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Weather now" hidden></div>`;
 const hm = (at) => new Date(at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
 const hour = (at) => new Date(at).toLocaleTimeString("en-SG", { hour: "numeric" });
-const away = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${m} m`);
+// The point sent is rounded to 0.001° (about 100 m, for caching and privacy), so distances are shown no finer than that.
+const away = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : m < 100 ? "under 100 m" : `${Math.round(m / 100) * 100} m`);
 const wxRow = (k, v, where, cls = "") => `<li class="wx-row ${cls}"><span class="wx-k">${k}</span><span class="wx-v">${v}<span class="wx-src">${where}</span></span></li>`;
 /** Fill the weather card with whatever NEA has fresh readings for (the Worker drops stale ones); hidden if none. */
-async function showWeather(lat, lng) {
-  if (!$("#weather")) return;
+async function showWeather(lat, lng, from = "this spot") {
+  const slot = $("#weather");
+  if (!slot) return;
   let d;
   try { d = await api(`/api/weather?lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`); } catch { return; }
   const el = $("#weather");
-  if (!el || !d) return;
+  if (!el || el !== slot || !d) return; // the panel changed while waiting: this reading is for another place
   const w = d.reading, rows = [];
   if (d.lightning) {
     const l = d.lightning, more = l.count > 1 ? `, ${l.count} strikes within 10 km` : "";
-    rows.push(wxRow("⚡ Lightning", `<b>${away(l.dist_m)} away</b>`, `${esc(hm(l.at))}${l.kind ? ` · ${esc(l.kind.toLowerCase())}` : ""}${more}`, "wx-alert"));
+    rows.push(wxRow("⚡ Lightning", `<b>${away(l.dist_m)}${l.dist_m < 100 ? "" : " away"}</b>`, `${esc(hm(l.at))}${l.kind ? ` · ${esc(l.kind.toLowerCase())}` : ""}${more}`, "wx-alert"));
   }
   if (d.rain) rows.push(wxRow("Raining now", `<b>${Number(d.rain.mm)} mm</b> in 5 min`, `${esc(d.rain.station)} rain gauge, ${away(d.rain.dist_m)} · ${esc(hm(d.rain.at))}`));
   if (d.forecast) rows.push(wxRow("Next 2 hours", `<b>${esc(d.forecast.text)}</b>`, `${esc(d.forecast.area)} area, until ${esc(hm(d.forecast.until))}`));
@@ -1008,9 +1030,9 @@ async function showWeather(lat, lng) {
     </div>
     <div class="weather-where">
       <span>${esc(w.station)} station</span>
-      <span class="muted">${away(w.dist_m)} away · ${esc(hm(w.at))}</span>
+      <span class="muted">${away(w.dist_m)}${w.dist_m < 100 ? "" : " away"} · ${esc(hm(w.at))}</span>
     </div>` : "") + (rows.length ? `<ul class="wx-rows">${rows.join("")}</ul>` : "") + `
-    <p class="weather-note">Latest readings from NEA, each from the station, area or region named. They aren't a measure of how much the trees cool this spot.</p>`;
+    <p class="weather-note">Latest readings from NEA, each from the station, area or region named; distances are from ${esc(from)}. They aren't a measure of how much the trees cool it.</p>`;
   el.hidden = false;
 }
 
@@ -1126,7 +1148,7 @@ $("#about").addEventListener("click", () => {
   openPanel(`
     <h2>About TreeNerd</h2>
     <div class="prose">
-      <p>Explore ${m.tree_count ? `Singapore's ${fmt.format(m.tree_count)} trees` : "every tree in Singapore"} by road, park, area, address or species.</p>
+      <p>Explore ${m.tree_count ? `the ${fmt.format(m.tree_count)} trees NParks records in Singapore` : "the trees NParks records in Singapore"} by road, park, area, address or species. Forest trees, such as those in the nature reserves, aren't recorded one by one, so they aren't included.</p>
       <h3>Data</h3>
       <ul>
         <li>Trees: <a href="https://treessg.nparks.gov.sg" target="_blank" rel="noopener noreferrer">Trees.sg</a> © National Parks Board${m.source_last_edit ? `, last changed ${esc(fmtDate(m.source_last_edit))}` : ""}</li>
@@ -1147,7 +1169,7 @@ $("#about").addEventListener("click", () => {
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
         <li><b>Trails</b> count the trees NParks records within ${M("trail_max_m")} m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
         <li><b>Trees per resident</b> uses the ${METHOD.residents_year} census, which counts residents only. Areas with under ${M("min_residents")} residents get no figure.</li>
-        <li><b>Weather</b> comes live from NEA, and each reading names where it's from. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
+        <li><b>Weather</b> appears on trees, parks, areas, subzones, roads up to ${WEATHER_MAX_EXTENT_KM} km across, and around any spot. It comes live from NEA, and each reading names where it's from. For a place, distances are measured from the middle of the box that contains it, which for an irregular shape can lie just outside it. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>

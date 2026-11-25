@@ -1,6 +1,8 @@
 // HTML page metadata (titles, descriptions, link previews) and sitemap.xml.
 const SITE = "https://treenerd.fyi";
-const DEFAULT_DESC = "Explore every tree in Singapore. Search by road, park, area, postal code or species.";
+// Never "every tree": NParks records managed trees, not the forests. The count is the live build's.
+const defaultDesc = (treeCount?: number | null) =>
+  `Explore ${treeCount ? `${fmt.format(treeCount)} trees recorded by NParks in Singapore` : "Singapore's trees, as recorded by NParks"}. Search by road, park, area, postal code or species.`;
 
 // Must match public/_headers (static assets get theirs from that file).
 export const PAGE_HEADERS: Record<string, string> = {
@@ -23,8 +25,8 @@ const fmt = new Intl.NumberFormat("en-SG");
 interface Meta { title: string; description: string; url: string }
 
 /** Title/description for a shared or crawled URL, from the database. Falls back to the defaults. */
-export async function pageMeta(db: D1Database, url: URL): Promise<Meta> {
-  const base = { title: "TreeNerd · Every tree in Singapore", description: DEFAULT_DESC, url: `${SITE}/` };
+export async function pageMeta(db: D1Database, url: URL, treeCount?: number | null): Promise<Meta> {
+  const base = { title: "TreeNerd · Singapore's trees", description: defaultDesc(treeCount), url: `${SITE}/` };
   try {
     const p = url.searchParams.get("p"), s = url.searchParams.get("s"), t = url.searchParams.get("t");
     if (t && /^\d{1,12}$/.test(t)) {
@@ -39,7 +41,7 @@ export async function pageMeta(db: D1Database, url: URL): Promise<Meta> {
         const facts = [r.scientific && r.common ? `${r.scientific}` : "", r.girth_m ? `girth ${Number(r.girth_m).toFixed(1)} m` : "",
           r.height_band ? `${r.height_band} m tall` : ""].filter(Boolean).join(", ");
         return { title: `${name}${where ? ` on ${where}` : ""} · TreeNerd`,
-          description: `${name}${where ? ` on ${where}` : ""}${facts ? ` (${facts})` : ""}. Explore every tree in Singapore on TreeNerd.`,
+          description: `${name}${where ? ` on ${where}` : ""}${facts ? ` (${facts})` : ""}. Explore Singapore's trees on TreeNerd.`,
           url: `${SITE}/?t=${t}` };
       }
     }

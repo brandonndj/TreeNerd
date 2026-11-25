@@ -106,3 +106,17 @@ test("PM2.5: the region whose centre is nearest, with NEA's 1-hour bands and adv
   }
   assert.equal(W.air(d, ...ORCHARD, Date.parse(a.at) + 121 * MIN), null);
 });
+
+test("feed check: quiet when every feed is healthy, names the feed that isn't", () => {
+  const feeds = Object.fromEntries(["temperature", "heat", "forecast", "rain", "lightning", "uv", "air"].map((f) => [f, load(f)]));
+  // the lightning fixture is from 22.46, so check at 22.50
+  assert.deepEqual(W.feedProblems(feeds, NOW), []);
+  assert.deepEqual(W.feedProblems({ ...feeds, air: null }, NOW), ["air: NEA could not be reached"]);
+  const renamed = load("heat"); renamed.data.records[0].item.readings.forEach((r) => { r.heat_stress = r.heatStress; delete r.heatStress; });
+  assert.deepEqual(W.feedProblems({ ...feeds, heat: renamed }, NOW), ["heat: no heat stress reading under 45 minutes old"]);
+  // two hours later everything is stale; at night UV isn't expected
+  const later = W.feedProblems(feeds, NOW + 2 * 3600_000).map((p) => p.split(":")[0]);
+  assert.deepEqual(later, ["temperature", "heat", "forecast", "air", "rain", "lightning"]);
+  assert.deepEqual(W.feedProblems({ ...feeds, uv: { data: { records: [{ index: [] }] } } }, Date.parse("2026-11-24T13:00:00+08:00"))
+    .filter((p) => p.startsWith("uv")), ["uv: no UV reading in the last 2.5 hours of daylight"]);
+});
