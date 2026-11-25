@@ -18,7 +18,7 @@ const CATS = [
 const KIND_LABEL = {
   road: "Road", park: "Park", subzone: "Subzone", planning_area: "Planning area", pcn: "Park connector",
   constituency: "Constituency", heritage_road: "Heritage road", species: "Species", address: "Address", mrt: "Station",
-  trail: "Trail",
+  trail: "Trail", tca: "Tree Conservation Area",
 };
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const catColor = (key) => css(`--c-${key}`);
@@ -200,6 +200,11 @@ map.on("load", async () => {
     },
   });
   // a trail's route, drawn under the trees when a trail is open
+  // Tree Conservation Area outlines: a faint fill and a dashed edge, under the trees
+  map.addSource("areas", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "areas-fill", type: "fill", source: "areas", paint: { "fill-color": css("--c-ink"), "fill-opacity": 0.06 } }, "trees");
+  map.addLayer({ id: "areas-line", type: "line", source: "areas", layout: { "line-join": "round" },
+    paint: { "line-color": css("--c-ink"), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 15, 2.5], "line-dasharray": [3, 2] } }, "trees");
   map.addSource("trail", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // drawn bold, with an outline, so it stands out from the basemap's own thin green paths
   map.addLayer({ id: "trail-casing", type: "line", source: "trail", layout: { "line-cap": "round", "line-join": "round" },
@@ -217,6 +222,7 @@ map.on("load", async () => {
   map.addSource("near", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "near", type: "line", source: "near", paint: { "line-color": css("--accent"), "line-width": 2, "line-dasharray": [2, 2] } });
   buildLegend();
+  showAreas(); // a shared link with ?tca=1 opens with the outlines on
   fetch(`/data/species.json?v=${v}`).then((r) => r.ok && r.json()).then((d) => d && (state.speciesDict = d));
   wireMapEvents();
   restoreFromUrl();
@@ -252,7 +258,7 @@ function showPois(rows) {
     geometry: { type: "Point", coordinates: [Number(p.lng), Number(p.lat)] },
     properties: { kind: p.kind, class: p.class, name: p.name, description: p.description || "", url: p.url || "" } })) });
 }
-function clearOverlays() { showTrail(null); showPois(null); popup?.remove(); }
+function clearOverlays() { showTrail(null); showPois(null); popup?.remove(); if (areaFocus) { areaFocus = null; showAreas(); } }
 let popup = null;
 /** A tapped amenity or heritage site: a small card on the map. */
 function poiPopup(f) {
@@ -278,6 +284,8 @@ function refreshMapTheme() {
     map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
     map.setPaintProperty("sel", "circle-stroke-color", css("--c-ink"));
     map.setPaintProperty("near", "line-color", css("--accent"));
+    map.setPaintProperty("areas-fill", "fill-color", css("--c-ink"));
+    map.setPaintProperty("areas-line", "line-color", css("--c-ink"));
     map.setPaintProperty("trail", "line-color", TRAIL_COLOR());
     map.setPaintProperty("trail-casing", "line-color", dark() ? "#0f1411" : "#ffffff");
     for (const [k, v] of Object.entries(poiPaint())) map.setPaintProperty("pois", k, v);
@@ -388,7 +396,9 @@ function buildLegendItems() {
     <label><input type="checkbox" data-c="${c.code}" ${state.cats.has(c.code) ? "checked" : ""}>
       <span class="dot" style="background:${catColor(c.key)}"></span>${c.label}
       <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("") +
-    `<button class="legend-all" id="legend-all" hidden>Show all</button>`;
+    `<button class="legend-all" id="legend-all" hidden>Show all</button>` +
+    (hasAreas() ? `<label class="legend-area"><input type="checkbox" id="legend-tca" ${areasOn ? "checked" : ""}>
+      <span class="area-swatch" aria-hidden="true"></span>Tree Conservation Areas</label>` : "");
   updateLegendHeader();
 }
 /**
@@ -425,6 +435,13 @@ function buildLegend() {
     updateLegendHeader();
   };
   $("#legend-items").addEventListener("change", (e) => {
+    if (e.target.id === "legend-tca") { // an outline on the map, not a tree filter
+      areasOn = e.target.checked;
+      const u = new URL(location.href);
+      areasOn ? u.searchParams.set("tca", "1") : u.searchParams.delete("tca");
+      history.replaceState(null, "", u);
+      return showAreas();
+    }
     const c = Number(e.target.dataset.c);
     e.target.checked ? state.cats.add(c) : state.cats.delete(c);
     applyCats();
@@ -432,7 +449,7 @@ function buildLegend() {
   $("#legend-items").addEventListener("click", (e) => {
     if (e.target.id !== "legend-all") return;
     CATS.forEach((c) => state.cats.add(c.code));
-    $("#legend-items").querySelectorAll("input").forEach((i) => { i.checked = true; });
+    $("#legend-items").querySelectorAll("input[data-c]").forEach((i) => { i.checked = true; }); // not the areas switch
     applyCats();
   });
   const lg = $("#legend"), tg = $("#legend-toggle");
@@ -486,6 +503,24 @@ const SUGGESTIONS = [
 ];
 /** Features that need data the live build may not have yet (older builds lack trails and residents). */
 const hasTrails = () => Number(state.meta?.place_counts?.trail) > 0;
+// Tree Conservation Areas appear once the live build has them (older builds have no pages or outlines)
+const hasAreas = () => Number(state.meta?.place_counts?.tca) > 0;
+let areaShapes = null, areasOn = new URL(location.href).searchParams.get("tca") === "1", areaFocus = null;
+/** Draw the Tree Conservation Area outlines: all of them with the map switch on, else just the open area's. */
+async function showAreas() {
+  const src = map.getSource("areas");
+  if (!src) return;
+  if (!hasAreas() || (!areasOn && !areaFocus)) return src.setData(EMPTY);
+  try {
+    areaShapes ||= await fetch(`/data/tca.geojson?v=${encodeURIComponent(state.meta?.built_at || "")}`).then((r) => (r.ok ? r.json() : EMPTY));
+  } catch { areaShapes = null; return; }
+  src.setData({ type: "FeatureCollection", features: areaShapes.features.filter((f) => areasOn || f.properties.s === areaFocus) });
+}
+/** Slug of a Tree Conservation Area from its name, as the pipeline makes it (pipeline/common.py slugify). */
+const slugify = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x00-\x7f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+// NParks' current page on Tree Conservation Areas (the link inside NParks' dataset no longer works)
+const NPARKS_TCA = "https://www.nparks.gov.sg/services/development-plan-submission/before-submit-development-plan";
+const TCA_RULE = "Inside a Tree Conservation Area, cutting any tree with a girth of more than 1 m, measured 1 m above the ground, needs written approval from NParks, even if no building works are under way.";
 const hasResidents = () => !!state.meta?.poi_counts; // built by the same pipeline version
 function showSuggestions() {
   items = SUGGESTIONS.filter((r) => r.top !== "trail" || hasTrails()); active = -1;
@@ -558,9 +593,11 @@ function setSheet(mode) {
     panel.hidden ? "0px" : `${panel.getBoundingClientRect().height}px`));
   if (mode !== "full") panel.scrollTop = 0;
 }
+// a divider under the pinned title once the content has scrolled beneath it
+panel.addEventListener("scroll", () => panel.classList.toggle("scrolled", panel.scrollTop > 4), { passive: true });
 function openPanel(html, { sheet } = {}) {
   const wasHidden = panel.hidden;
-  body.innerHTML = html; panel.hidden = false; panel.scrollTop = 0;
+  body.innerHTML = html; panel.hidden = false; panel.scrollTop = 0; panel.classList.remove("scrolled");
   document.body.classList.add("panel-open");
   if (isPhone() && (wasHidden || sheet || state.sheet === "peek")) setSheet(sheet || "half");
   requestAnimationFrame(() => map.triggerRepaint()); // some GPUs leave a stale canvas under new overlays
@@ -695,10 +732,13 @@ async function openPlace(kind, slug, bbox, fly = true) {
   popup?.remove();
   showTrail(kind === "trail" ? d.slug : null);
   showPois(d.pois);
+  areaFocus = kind === "tca" ? d.slug : null;
+  showAreas();
   await highlightPlace(d);
   if (seq === navSeq) renderPlace(d);
 }
 async function highlightPlace(d, speciesId) {
+  if (d.trees_listed === false) return setHighlight(null); // a Tree Conservation Area: its outline shows instead
   let expr;
   if (d.tile_key) expr = ["==", ["get", d.tile_key], d.place_id];
   else {
@@ -708,7 +748,30 @@ async function highlightPlace(d, speciesId) {
   if (speciesId) expr = ["all", expr, ["==", ["get", "s"], speciesId]];
   setHighlight(expr);
 }
+/** A Tree Conservation Area: the build's figures, NParks' rule, and what the map can't show. */
+function renderArea(d) {
+  const extra = d.extra || {};
+  const species = d.top_species.map((s) => ({ id: s.id, n: s.n, label: s.common || s.scientific || `Species ${s.id}`, sub: s.common ? s.scientific : "" }));
+  openPanel(`
+    <h2>${esc(d.name)}</h2>
+    <p class="sub">${esc([KIND_LABEL.tca, extra.region].filter(Boolean).join(" · "))}</p>
+    <div class="callout">${esc(TCA_RULE)} This includes trees on private land, such as homes and condos.</div>
+    <p class="note">Most trees on private land aren't in NParks' records, so they aren't shown on this map. Check with NParks before cutting a large tree. Applications go to NParks or through the OneService app.</p>
+    <div class="actions"><a class="btn" href="${NPARKS_TCA}" target="_blank" rel="noopener noreferrer">NParks: Tree Conservation Areas ↗</a></div>
+    <div class="stats">
+      ${statTile(fmt.format(d.tree_count), "trees NParks records here")}
+      ${statTile(fmt.format(d.species_count), "species")}
+      ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
+    </div>
+    ${d.heritage_count ? `<div class="callout">🌟 ${d.heritage_count} heritage tree${d.heritage_count > 1 ? "s" : ""}</div>` : ""}
+    <h3>Tree types</h3>${categoryStack(d.categories, d.tree_count)}
+    <h3>Top species</h3>${barList(species, d.tree_count)}
+    <p class="note">The dashed line on the map is the area's boundary, from NParks. Its trees aren't listed one by one here: the area is large, so open a road, park or area inside it to see them.</p>
+    <div class="actions"><button class="btn" id="share">🔗 Share</button></div>`);
+  $("#share").addEventListener("click", share);
+}
 function renderPlace(d) {
+  if (d.kind === "tca") return renderArea(d);
   const native = Object.fromEntries((d.native || []).map((r) => [String(r.k), r.n]));
   const pct = (n) => (d.tree_count ? Math.round(((n || 0) / d.tree_count) * 100) : 0);
   const nativePct = pct(native["1"]), unknownPct = pct(native["null"]);
@@ -849,30 +912,32 @@ async function openTree(id, fly = true, keepContext = false) {
   const s = t.species || {};
   const cat = CATS.find((c) => c.key === t.category) || CATS.at(-1);
   const P = t.places || {};
-  const placeLink = (kind) => P[kind] ? `<button class="linkish" data-kind="${kind}" data-slug="${esc(P[kind].slug)}">${esc(P[kind].name)}</button>` : null;
+  // Where the tree is: one tappable row per place (a full-width 44-point target), so the facts above stay compact
+  const whereRow = (label, kind, slug, name, meta = "", id = "") => `<li><button data-kind="${kind}" data-slug="${esc(slug)}"${id ? ` id="${id}"` : ""}>
+    <span class="w-k">${label}</span><span class="w-v">${esc(name)}${meta ? ` <span class="muted">· ${meta}</span>` : ""}</span><span class="chev" aria-hidden="true">›</span></button></li>`;
+  const plainRow = (label, value) => `<li><div><span class="w-k">${label}</span><span class="w-v">${esc(value)}</span></div></li>`;
+  const where = [
+    ...[["Road", "road"], ["Park", "park"], ["Park connector", "pcn"]].filter(([, k]) => P[k])
+      .map(([label, k]) => whereRow(label, k, P[k].slug, P[k].name, k === "road" && t.road_dist != null ? `${Math.round(t.road_dist)} m away` : "")),
+    ...(t.nature_way ? [plainRow("Nature Way", t.nature_way)] : []),
+    ...[["Subzone", "subzone"], ["Planning area", "planning_area"], ["Constituency", "constituency"], ["Heritage road", "heritage_road"]]
+      .filter(([, k]) => P[k]).map(([label, k]) => whereRow(label, k, P[k].slug, P[k].name)),
+    ...(t.tca ? [hasAreas() ? whereRow("Conservation area", "tca", slugify(t.tca), t.tca, "", "tca-link") : plainRow("Conservation area", t.tca)] : []),
+  ];
   const rows = [
     ["Girth", t.girth_m ? `${t.girth_m.toFixed(2)} m <span class="muted">(≈${Math.round((t.girth_m / Math.PI) * 100)} cm diameter)</span>${t.measure_flag ? " ⚠" : ""}` : esc(t.girth_band)],
     ["Height", t.height_band ? `${esc(t.height_band)} m${t.measure_flag ? " ⚠" : ""}` : null],
     ["Age", t.age != null && t.age >= 0 ? `~${Number(t.age)} years` : null],
     ["Planted", esc(t.date_planted)],
     ["Carbon", t.carbon_kg ? `~${tonnes(t.carbon_kg)} <span class="muted">(estimate)</span>` : CARBON_SKIP[t.carbon_skip] ? `<span class="muted">Not estimated: ${CARBON_SKIP[t.carbon_skip]}</span>` : null],
-    ["Road", placeLink("road") && `${placeLink("road")}${t.road_dist != null ? ` <span class="muted">· ${Math.round(t.road_dist)} m</span>` : ""}`],
-    ["Park", placeLink("park")],
-    ["Park connector", placeLink("pcn")],
-    ["Nature Way", esc(t.nature_way)],
-    ["Subzone", placeLink("subzone")],
-    ["Planning area", placeLink("planning_area")],
-    ["Constituency", placeLink("constituency")],
-    ["Heritage road", placeLink("heritage_road")],
-    ["Conservation", t.tca ? `In ${esc(t.tca)}` : null],
     ["Land use", esc(t.land_use)],
     ["Tree ID", `${Number(t.id)}`],
     ["Updated", esc(t.last_edited)],
   ].filter(([, v]) => v);
   openPanel(`
     ${back ? `<button class="linkish" id="back">← Back to ${esc(state.place?.name || state.species?.common || "list")}</button>` : ""}
-    <h2>${esc(s.common || s.scientific || "Tree")}</h2>
-    <p class="sub"><span class="sci">${esc(s.scientific || "")}</span>${s.family ? ` · ${esc(s.family)}` : ""}</p>
+    <div class="panel-head"><h2>${esc(s.common || s.scientific || "Tree")}</h2>
+    <p class="sub"><span class="sci">${esc(s.scientific || "")}</span>${s.family ? ` · ${esc(s.family)}` : ""}</p></div>
     <p><span class="chip"><span class="dot" style="background:${catColor(cat.key)}"></span>${cat.label}</span>
       ${s.native === 1 ? `<span class="chip">Native</span>` : s.native === 0 ? `<span class="chip" ${s.native_src ? 'title="From Kew\'s World Checklist: native range entirely outside Asia"' : ""}>Non-native${s.native_src ? " ·&nbsp;Kew" : ""}</span>` : ""}
       ${t.incorrect ? `<span class="chip" title="Reported as incorrect on Trees.sg">⚠ Reported</span>` : ""}</p>
@@ -880,6 +945,8 @@ async function openTree(id, fly = true, keepContext = false) {
     ${t.measure_flag ? `<div class="callout warn">⚠ <b>Possible recording error.</b> The recorded girth (${Number(t.girth_m).toFixed(1)} m) and height (${esc(t.height_band)} m) can't both be right: the trunk would be wider than the tree is plausibly tall. One of them is probably mis-recorded in the source data, so no carbon estimate is shown.</div>` : ""}
     <h3>Details</h3>
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    ${where.length ? `<h3>Location</h3><ul class="where">${where.join("")}</ul>` : ""}
+    ${t.tca ? `<p class="note">${esc(TCA_RULE.replace("Inside a Tree Conservation Area, cutting any tree", "Cutting a tree in this area"))}</p>` : ""}
     <div class="actions">
       ${s.id ? `<button class="btn" id="sp">All ${esc(s.common || s.scientific)} trees</button>` : ""}
       ${safeUrl(s.ffw_url) ? `<a class="btn" href="${esc(safeUrl(s.ffw_url))}" target="_blank" rel="noopener noreferrer">Flora &amp; Fauna Web ↗</a>` : ""}
@@ -1201,6 +1268,8 @@ $("#about").addEventListener("click", () => {
         <li><b>Trails</b> count the trees NParks records within ${M("trail_max_m")} m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
         <li><b>Trees per resident</b> uses the ${METHOD.residents_year} census, which counts residents only. Areas with under ${M("min_residents")} residents get no figure.</li>
         <li><b>Weather</b> appears on trees, parks, areas, subzones, roads up to ${WEATHER_MAX_EXTENT_KM} km across, and around any spot. It comes live from NEA, and each reading names where it's from. For a place, distances are measured from the middle of the box that contains it, which for an irregular shape can lie just outside it. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
+        <li><b>Tree Conservation Areas</b> are NParks' two gazetted areas (Central and Changi), with boundaries from NParks. ${esc(TCA_RULE)} The rule covers private land too, but most private trees aren't in NParks' records, so they aren't on this map. The site doesn't say whether a particular tree needs approval: NParks' records don't say at what height each girth was measured.</li>
+        <li><b>The "Conservation" tree type</b> is NParks' own layer of "conservation trees". NParks doesn't publish what it covers; most of these trees are in nature parks and reserves. It isn't the same as the Tree Conservation Areas: most trees in those areas are street, park or Botanic Gardens trees.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>

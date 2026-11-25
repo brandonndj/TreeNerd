@@ -35,11 +35,18 @@ const PLACE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id",
   pcn: "pcn_id", constituency: "ed_id", heritage_road: "hr_id",
 };
-const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson"]);
+const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson", "tca.geojson"]);
 // Files that belong to one database build ("<name>-a.<ext>" / "-b"); see getSlotObject.
-const SLOT_FILES: Record<string, [string, string]> = { "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"] };
-/** Kinds of place that have a page: the column-based ones, plus trails (a tree can be on several). */
-const PLACE_KINDS = new Set([...Object.keys(PLACE_COLUMN), "trail"]);
+const SLOT_FILES: Record<string, [string, string]> = {
+  "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"], "tca.geojson": ["tca", "geojson"],
+};
+/**
+ * Kinds of place that have a page: the column-based ones, plus trails (a tree can be on several) and
+ * Tree Conservation Areas ("tca": large areas whose figures the build works out, so their pages run no
+ * tree queries and need no index; their trees aren't listed).
+ */
+const PLACE_KINDS = new Set([...Object.keys(PLACE_COLUMN), "trail", "tca"]);
+const PRECOMPUTED_KINDS = new Set(["tca"]);
 // Place columns present in the changes table (trees added to / gone from the records).
 const CHANGE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id", constituency: "ed_id",
@@ -196,6 +203,7 @@ async function speciesNames(env: Env, ids: number[]) {
  * trees. Column names come only from the fixed PLACE_COLUMN map, never from user input.
  */
 function placeCondition(kind: string) {
+  if (PRECOMPUTED_KINDS.has(kind)) return "0"; // never queried: see apiPlace and apiPlaceTrees
   if (kind === "trail") return "t.id IN (SELECT tree_id FROM trail_trees WHERE trail_id=?)";
   return `t.${PLACE_COLUMN[kind]}=?`;
 }
@@ -235,6 +243,7 @@ async function apiSearch(url: URL, env: Env) {
 
 async function apiPlace(env: Env, kind: string, slug: string) {
   const { place, cond } = await getPlace(env, kind, slug);
+  if (PRECOMPUTED_KINDS.has(kind)) return apiPrecomputedPlace(env, kind, slug, place);
   const [cats, sizes, heights, natives] = await env.DB.batch([
     env.DB.prepare(`SELECT t.category k, count(*) n FROM trees t WHERE ${cond} GROUP BY 1 ORDER BY 2 DESC`).bind(place.id),
     env.DB.prepare(`SELECT t.size k, count(*) n FROM trees t WHERE ${cond} GROUP BY 1`).bind(place.id),
@@ -261,7 +270,24 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   });
 }
 
+/** A Tree Conservation Area: everything comes from the place row the build wrote; no tree queries. */
+async function apiPrecomputedPlace(env: Env, kind: string, slug: string, place: Record<string, unknown>) {
+  const extra = parseJSON<Record<string, unknown>>(place.extra as string, {});
+  const top = parseJSON<[number, number][]>(place.top_species as string, []);
+  const names = await speciesNames(env, top.map(([id]) => id));
+  const cats = Object.entries((extra.categories ?? {}) as Record<string, number>).map(([k, n]) => ({ k, n }));
+  return json({
+    changes: null, pois: null, kind, slug, name: place.name, alt: parseJSON(place.alt as string, []),
+    tree_count: place.tree_count, species_count: place.species_count,
+    heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
+    bbox: parseJSON(place.bbox as string, null), extra, tile_key: null, place_id: place.id, trees_listed: false,
+    top_species: top.map(([id, n]) => ({ id, n, ...(names.get(id) ?? {}) })),
+    categories: cats, sizes: [], heights: [], native: [],
+  });
+}
+
 async function apiPlaceTrees(url: URL, env: Env, kind: string, slug: string, format: "json" | "csv" | "ids") {
+  if (PRECOMPUTED_KINDS.has(kind)) throw new HttpError(404, "this area's trees aren't listed one by one");
   const { place, cond } = await getPlace(env, kind, slug);
   const species = url.searchParams.get("species");
   if (species && !ID_RE.test(species)) throw new HttpError(400, "invalid species");
@@ -851,7 +877,7 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
       detail: set(env.ONEMAP_EMAIL) && set(env.ONEMAP_PASSWORD) ? (onemapSearch.value?.token ? "set, and signing in works" : "set, but signing in failed") : "not set (optional)" },
     { name: "GitHub token", level: !set(env.GITHUB_TOKEN) ? "warn" : github.value === 200 ? "ok" : "fail", ms: set(env.GITHUB_TOKEN) ? github.ms : undefined,
       detail: !set(env.GITHUB_TOKEN) ? "not set: a missed weekly update won't be retried and NEA alerts can't open issues"
-        : github.value === 200 ? `set, and accepted for ${env.GITHUB_REPO}` : `set, but GitHub answered ${github.value ?? github.error}` },
+        : github.value === 200 ? "set, and accepted for the repository" : `set, but GitHub answered ${github.value ?? github.error}` }, // no account or repo name: the page is public
   ];
 
   // A job that hasn't run yet is expected for one interval after a deploy or a data update (each update

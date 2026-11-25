@@ -99,6 +99,28 @@ def consistency(db: sqlite3.Connection, meta: dict, search: list[dict]) -> list[
           "trail_trees points at places that aren't trails")
     check(one_value(db, "SELECT count(*) FROM trail_trees") == meta.get("trail_trees", 0), "trail_trees row count differs from the summary")
 
+    # Tree Conservation Areas: trees carry the area's name (tca), so they're re-counted by name
+    tca_rows = db.execute("""
+            SELECT p.slug, p.name, p.tree_count, p.species_count, p.heritage_count, p.carbon_kg, p.extra,
+                   count(t.id) n, count(DISTINCT t.species_id) sp, coalesce(sum(t.category='heritage'), 0) ht,
+                   coalesce(sum(t.carbon_kg), 0) carbon
+              FROM places p LEFT JOIN trees t ON t.tca=p.name WHERE p.kind='tca' GROUP BY p.id""").fetchall()
+    for r in tca_rows:
+        where, extra = f"tca/{r['slug']}", json.loads(r["extra"] or "{}")
+        check((r["tree_count"], r["species_count"], r["heritage_count"]) == (r["n"], r["sp"], r["ht"]),
+              f"{where}: shows {r['tree_count']} trees / {r['species_count']} species / {r['heritage_count']} heritage, has {r['n']} / {r['sp']} / {r['ht']}")
+        check(abs(r["carbon_kg"] - r["carbon"]) <= max(1.0, 1e-6 * r["carbon"]), f"{where}: carbon {r['carbon_kg']} vs {r['carbon']:.1f}")
+        cats = dict(db.execute("SELECT category, count(*) FROM trees WHERE tca=? GROUP BY 1", (r["name"],)).fetchall())
+        # the page's map extent is the boundary's, so it must hold every tree recorded inside
+        box = json.loads(db.execute("SELECT bbox FROM places WHERE kind='tca' AND slug=?", (r["slug"],)).fetchone()[0] or "null")
+        lo = db.execute("SELECT min(lng), min(lat), max(lng), max(lat) FROM trees WHERE tca=?", (r["name"],)).fetchone()
+        check(box is not None and lo[0] is not None and box[0] <= lo[0] and box[1] <= lo[1] and box[2] >= lo[2] and box[3] >= lo[3],
+              f"{where}: its map extent {box} doesn't hold its trees {tuple(lo)}")
+        check(extra.get("categories") == cats, f"{where}: tree types {extra.get('categories')} vs {cats}")
+    stray = one_value(db, """SELECT count(*) FROM trees t WHERE t.tca IS NOT NULL
+                               AND NOT EXISTS (SELECT 1 FROM places p WHERE p.kind='tca' AND p.name=t.tca)""")
+    check(stray == 0, f"{stray} trees are in a Tree Conservation Area that has no page")
+
     # trees per 1,000 residents: only for areas with enough residents, and exactly tree_count / residents
     for r in db.execute("SELECT kind, slug, tree_count, extra FROM places WHERE kind IN ('planning_area', 'subzone')"):
         extra = json.loads(r["extra"] or "{}")
@@ -124,6 +146,7 @@ def consistency(db: sqlite3.Connection, meta: dict, search: list[dict]) -> list[
     for r in random.Random(1).sample(top, min(200, len(top))):  # top species lists, on a sample
         pid = "(SELECT id FROM places WHERE kind=? AND slug=?)"
         where = (f"id IN (SELECT tree_id FROM trail_trees WHERE trail_id={pid})" if r["kind"] == "trail"
+                 else f"tca=(SELECT name FROM places WHERE kind=? AND slug=?)" if r["kind"] == "tca"
                  else f"{PLACE_COLUMNS[r['kind']]}={pid}")
         real = dict(db.execute(f"""SELECT species_id, count(*) FROM trees WHERE {where}
                                     AND species_id IS NOT NULL GROUP BY 1""", (r["kind"], r["slug"])).fetchall())

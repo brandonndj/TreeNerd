@@ -49,6 +49,9 @@ def main():
     # trails passing through: only their trees inside the fixture are kept
     trail_rows = [tuple(r) for r in db.execute("SELECT trail_id, tree_id FROM trail_trees") if r["tree_id"] in ids]
     place_ids |= {t for t, _ in trail_rows}
+    # Tree Conservation Areas the fixture's trees are in (trees name their area; there's no id column)
+    tca_names = {t["tca"] for t in trees} - {None}
+    place_ids |= {r["id"] for r in db.execute("SELECT id, name FROM places WHERE kind='tca'") if r["name"] in tca_names}
     species_ids = {t["species_id"] for t in trees} - {None}
     places = [p for p in db.execute("SELECT * FROM places") if p["id"] in place_ids]
     species = [s for s in db.execute("SELECT * FROM species") if s["id"] in species_ids]
@@ -108,6 +111,11 @@ def main():
     shapes = json.loads((OUT / "trails.geojson").read_text())
     shapes["features"] = [f for f in shapes["features"] if f["properties"]["s"] in trail_slugs]
     (DEST / "trails.geojson").write_text(json.dumps(shapes, separators=(",", ":")))
+    # Tree Conservation Area outlines, for the areas the fixture's trees are in
+    tca_slugs = {p["slug"] for p in places if p["kind"] == "tca"}
+    tca = json.loads((OUT / "tca.geojson").read_text()) if (OUT / "tca.geojson").exists() else {"type": "FeatureCollection", "features": []}
+    tca["features"] = [f for f in tca["features"] if f["properties"]["s"] in tca_slugs]
+    (DEST / "tca.geojson").write_text(json.dumps(tca, separators=(",", ":")))
     sdict = json.loads((OUT / "species.json").read_text())
     (DEST / "species.json").write_text(json.dumps({k: v for k, v in sdict.items() if int(k) in species_ids},
                                                   ensure_ascii=False, separators=(",", ":")))

@@ -2,6 +2,22 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-25: Tree Conservation Areas
+
+### Added
+- Tree Conservation Areas (arriving with the weekly data update on Sunday night, early Monday in Singapore): NParks' two protected areas, Central and Changi, each have a page with its boundary on the map, the trees NParks records there and its top species. Search for "Tree Conservation Area", or switch on "Tree Conservation Areas" in the Tree types panel to see both outlined on the map.
+- Each page explains NParks' rule: inside these areas, cutting any tree with a girth of more than 1 m, measured 1 m above the ground, needs NParks' written approval, including trees on private land such as homes and condos. Most private trees aren't in NParks' records, so they aren't shown on the map.
+- A tree inside one of the areas now links to that area's page and states the rule.
+
+### Changed
+- Tree pages are neater: the details are evenly and closely spaced, and the road, park and areas a tree is in are listed under "Location" as rows you tap to open.
+- The title and the close button (X) stay at the top of the panel while you scroll, so you can always close it without scrolling back up. On tree pages the scientific name stays with the title.
+- The About panel explains that the "Conservation" tree type is NParks' own record of conservation trees, mostly in nature parks and reserves, and isn't the same as the Tree Conservation Areas.
+
+### Internal
+- The site no longer names the owner's GitHub account: `/status` says the token is "accepted for the repository", and `/.well-known/security.txt` gives the Telegram channel as the contact. A test checks every page and public file for the account name, read from `wrangler.jsonc`.
+- New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); its map extent is the boundary's, not the recorded trees'; `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are NParks' boundaries as published, every point kept (about 80 KB), as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
+
 ## 2026-11-25: Steadier weather readings
 
 ### Fixed

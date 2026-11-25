@@ -530,7 +530,14 @@ def main():
         names = [name_fn(f["properties"]) for f in feats]
         return [names[k] if k >= 0 else None for k in j]
 
-    tree_tca = flag_poly("dgs_tree_conservation_areas.geojson", lambda p: p["NAME"], "tree conservation areas")
+    # Tree Conservation Areas (NParks, gazetted 1991): a place each, with figures worked out here, so
+    # their pages need no extra index on trees. Trees keep the area's name in `tca` as before.
+    tca_feats, tca_ids = poly_places("dgs_tree_conservation_areas.geojson", "tca", lambda p: p["NAME"].strip(),
+                                     lambda p: {"region": (p.get("REGION") or "").strip() or None})
+    j = polygon_join(pts, tca_feats, "tree conservation areas")
+    tree_tca_pid = np.where(j >= 0, tca_ids[np.maximum(j, 0)], -1) if len(tca_ids) else np.full(len(trees), -1)
+    tca_names = [f["properties"]["NAME"].strip() for f in tca_feats]
+    tree_tca = [tca_names[k] if k >= 0 else None for k in j] if tca_feats else [None] * len(trees)
     hr_feats = load_fc("dgs_heritage_road_buffers.geojson", required=False)
     hr_ids = np.array([add_place("heritage_road", title(f["properties"]["ROAD_NM"]),
                                  extra={"url": f["properties"].get("DESCRIPT")}, slug=slugify(
@@ -641,6 +648,11 @@ def main():
     for pid, r in zip(trail_pids, routes):
         for i in r["trees"]:
             add_to(pid, trees[i])
+    tca_cats = defaultdict(Counter)  # tree types in each Tree Conservation Area, for its page
+    for i in np.nonzero(tree_tca_pid >= 0)[0]:
+        pid = int(tree_tca_pid[i])
+        add_to(pid, trees[i])
+        tca_cats[pid][trees[i]["category"]] += 1
 
     for p in places:
         s = stats.get(p["id"])
@@ -670,6 +682,16 @@ def main():
         kept_routes.append(r)
         kept_slugs.append(p["slug"])
     trail_geo = extras.trail_shapes(kept_routes, kept_slugs)
+    for pid in tca_cats:
+        if pid in kept:
+            kept[pid]["extra"]["categories"] = dict(tca_cats[pid].most_common())
+    # An area's map extent is its boundary, not its recorded trees: many trees inside are on private land
+    # and not in NParks' records, so the trees can stop short of the edge and the page would cut it off.
+    for f, pid in zip(tca_feats, tca_ids):
+        if int(pid) in kept:
+            kept[int(pid)]["bbox"] = [round(v, 6) for v in shapely.bounds(shapely.force_2d(shape(f["geometry"]))).tolist()]
+    tca_geo = extras.area_shapes([(f, kept[int(pid)]["slug"], kept[int(pid)]["name"])
+                                  for f, pid in zip(tca_feats, tca_ids) if int(pid) in kept])
 
     # residents per area (Census 2020) and the stories behind road names
     n = extras.apply_residents(places_with_trees, extras.residents())
@@ -838,6 +860,7 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
                for st in stations]
     write_json(OUT / "search.json", search)
     write_json(OUT / "trails.geojson", trail_geo or {"type": "FeatureCollection", "features": []})
+    write_json(OUT / "tca.geojson", tca_geo)
     write_json(OUT / "species.json", {str(s["id"]): {
         "n": s["common"], "sci": s["scientific"], "fam": s["family"], "nat": s["native"], "c": s["tree_count"]}
         for s in species.values() if s["tree_count"]})

@@ -76,7 +76,9 @@ a { color: var(--accent); }
 .panel { position: fixed; z-index: 4; left: 12px; top: 74px; bottom: 12px; width: 390px; background: var(--surface);
   border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: auto;
   overscroll-behavior: contain; padding: 18px 18px 24px; }
-.panel-close { position: absolute; top: 6px; right: 6px; }
+/* The X and the title stay at the top while the panel scrolls. The X floats with no height of its own
+   (negative bottom margin), so nothing wraps around it; the title leaves room for it on the right. */
+.panel-close { position: sticky; top: -12px; float: right; z-index: 3; margin: -12px -12px -44px 0; } /* sticky offsets count from inside the 18px padding */
 /* Close buttons: a drawn X in a filled circle, big enough to see and hit with a thumb. */
 .panel-close, #clear { display: grid; place-items: center; padding: 0; color: var(--text); }
 .panel-close::before, #clear::before { content: ""; grid-area: 1 / 1; width: 32px; height: 32px; border-radius: 50%;
@@ -85,7 +87,16 @@ a { color: var(--accent); }
 .panel-close:hover, #clear:hover { background: transparent; }
 .panel-close:hover::before, #clear:hover::before { background: var(--border); }
 .sheet-handle { display: none; }
-.panel h2 { margin: 2px 40px 2px 0; font-size: 22px; line-height: 1.2; }
+.panel h2 { position: sticky; top: -18px; z-index: 2; margin: 2px -18px 2px; padding: 6px 56px 6px 18px; font-size: 22px; line-height: 1.2;
+  background: var(--surface); }
+#panel-body > h2:first-child { margin-top: -18px; padding-top: 14px; }
+.panel.scrolled h2 { box-shadow: 0 1px 0 var(--border); } /* a divider once content slides under it */
+/* tree pages pin the name and the scientific name together */
+.panel-head { position: sticky; top: -18px; z-index: 2; margin: 2px -18px 10px; padding: 6px 56px 8px 18px; background: var(--surface); }
+#panel-body > .panel-head:first-child { margin-top: -18px; padding-top: 14px; }
+.panel-head h2 { position: static; margin: 0; padding: 0; box-shadow: none !important; background: none; }
+.panel-head .sub { margin: 2px 0 0; }
+.panel.scrolled .panel-head { box-shadow: 0 1px 0 var(--border); }
 .panel h3 { margin: 22px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .panel .sub { color: var(--muted); margin: 0 0 12px; }
 .sci { font-style: italic; }
@@ -103,7 +114,16 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
 .stack { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 6px 0; }
 .stack-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; margin: 0; align-items: baseline; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 14px; margin: 0; align-items: baseline; }
+/* where a tree is: tappable rows in one card, evenly spaced */
+.where { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.where li + li { border-top: 1px solid var(--border); }
+.where li > button, .where li > div { display: grid; grid-template-columns: minmax(6.5em, max-content) 1fr auto; gap: 4px 12px; align-items: center;
+  width: 100%; min-height: var(--tap); padding: 6px 12px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; }
+.where li > button:hover { background: var(--surface-2); }
+.where .w-k { color: var(--muted); font-size: 14px; }
+.where .w-v { min-width: 0; overflow-wrap: anywhere; }
+.where .chev { color: var(--muted); font-size: 20px; line-height: 1; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; }
 .linkish { border: 0; background: none; padding: 4px 0; color: var(--accent); text-decoration: underline; text-align: left; }
@@ -195,6 +215,10 @@ details.changes summary { cursor: pointer; color: var(--accent); padding: 8px 0;
 .legend-all { display: flex; align-items: center; width: fit-content; margin: 0 0 0 auto; padding: 4px 0; border: 0;
   background: none; color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; }
 .legend-all[hidden] { display: none; }
+/* the Tree Conservation Areas switch: an outline on the map, so set apart from the tree types */
+.legend-area { margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--border); }
+.area-swatch { display: inline-block; width: 12px; height: 12px; flex: none; border: 2px dashed var(--c-ink); border-radius: 2px;
+  background: color-mix(in srgb, var(--c-ink) 8%, transparent); box-sizing: border-box; }
 .legend label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
 .legend input { accent-color: var(--accent); margin: 0; width: 18px; height: 18px; }
 .legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
@@ -288,7 +312,9 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
     background: var(--surface); touch-action: none; cursor: grab; }
   .sheet-handle::after { content: ""; position: absolute; left: 50%; top: 10px; width: 40px; height: 5px;
     margin-left: -20px; border-radius: 3px; background: var(--border); }
-  .panel-close { top: 18px; right: 8px; z-index: 3; }
+  .panel-close { top: calc(var(--tap) - 2px); margin: -2px -10px -44px 0; } /* beside the title, under the handle */
+  .panel h2, .panel-head { top: var(--tap); }
+  #panel-body > h2:first-child, #panel-body > .panel-head:first-child { margin-top: 0; padding-top: 4px; }
   .panel-close::before { width: 36px; height: 36px; }
   .btn { min-height: var(--tap); }
   .toast { bottom: calc(var(--sheet-offset, 0px) + 16px + var(--safe-b)); }

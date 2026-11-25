@@ -42,6 +42,24 @@ the classes it leaves out, so a new kind NParks adds is noticed and can be added
 **A big jump in changes is treated as a data problem.** More than 5% of trees appearing or disappearing
 in one update isn't logged as news. *Why:* that is almost always NParks re-issuing records.
 
+**Tree Conservation Areas: pages and outlines, no tree list.** The two areas hold about 129,000 recorded
+trees. Listing or highlighting them would need an index on the trees table, rebuilt every update (about
+0.6 million billed rows a month); the build works out their figures instead and the map draws the
+boundary. The rule is quoted from NParks' current guidelines (girth over 1 m, measured 1 m above the
+ground; older NParks material said 0.5 m). No count of "trees over 1 m" and no per-tree verdict: NParks'
+records don't say at what height each girth was measured. No fine amount: it couldn't be confirmed from
+the Act (the statute site refuses automated reads). The page says plainly that most private trees aren't
+on the map, though the rule covers them, so a homeowner doesn't read "no dots" as "no rule".
+
+**Area outlines are NParks' boundaries as published.** Every point is kept (coordinates to about 10 cm).
+A simplified outline was within 3.6 m of NParks' line, but these are legal boundaries and the full
+outlines are only about 80 KB, so there is no reason to redraw them. Which trees are inside is always
+decided against NParks' original boundary.
+
+**The "Conservation" tree type keeps NParks' name, with an explanation.** It's NParks' "conservation
+trees" layer, mostly in nature parks and reserves, and different from the Tree Conservation Areas.
+Renaming it (say, "Nature areas") would be our reading of the data, not NParks' definition.
+
 ## Live weather (NEA)
 
 Readings come from NEA's real-time feeds (`src/weather.ts`). Each shows where it's from and when, and is
