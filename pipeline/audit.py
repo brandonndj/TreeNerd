@@ -111,6 +111,11 @@ def consistency(db: sqlite3.Connection, meta: dict, search: list[dict]) -> list[
               f"{where}: shows {r['tree_count']} trees / {r['species_count']} species / {r['heritage_count']} heritage, has {r['n']} / {r['sp']} / {r['ht']}")
         check(abs(r["carbon_kg"] - r["carbon"]) <= max(1.0, 1e-6 * r["carbon"]), f"{where}: carbon {r['carbon_kg']} vs {r['carbon']:.1f}")
         cats = dict(db.execute("SELECT category, count(*) FROM trees WHERE tca=? GROUP BY 1", (r["name"],)).fetchall())
+        # the page's map extent is the boundary's, so it must hold every tree recorded inside
+        box = json.loads(db.execute("SELECT bbox FROM places WHERE kind='tca' AND slug=?", (r["slug"],)).fetchone()[0] or "null")
+        lo = db.execute("SELECT min(lng), min(lat), max(lng), max(lat) FROM trees WHERE tca=?", (r["name"],)).fetchone()
+        check(box is not None and lo[0] is not None and box[0] <= lo[0] and box[1] <= lo[1] and box[2] >= lo[2] and box[3] >= lo[3],
+              f"{where}: its map extent {box} doesn't hold its trees {tuple(lo)}")
         check(extra.get("categories") == cats, f"{where}: tree types {extra.get('categories')} vs {cats}")
     stray = one_value(db, """SELECT count(*) FROM trees t WHERE t.tca IS NOT NULL
                                AND NOT EXISTS (SELECT 1 FROM places p WHERE p.kind='tca' AND p.name=t.tca)""")

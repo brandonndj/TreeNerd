@@ -255,6 +255,10 @@ test("Tree Conservation Areas: figures from the build, no tree list, an outline 
   const shapes = await getJson("/data/tca.geojson");
   assert.deepEqual(shapes.features.map((f) => f.properties.s), ["central-tree-conservation-area"]);
   assert.equal(shapes.features[0].geometry.type, "Polygon");
+  // the page's map extent is the boundary's, not just where recorded trees are (private trees aren't recorded)
+  const ring = shapes.features[0].geometry.coordinates.flat(), xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  const r6 = (v) => Math.round(v * 1e6) / 1e6;
+  assert.deepEqual(d.bbox.map(r6), [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map(r6));
   const search = await getJson("/api/search?q=tree%20conservation");
   assert.ok(search.results.some((r) => r.kind === "tca" && r.slug === "central-tree-conservation-area"), JSON.stringify(search.results));
 });

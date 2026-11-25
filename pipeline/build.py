@@ -685,6 +685,11 @@ def main():
     for pid in tca_cats:
         if pid in kept:
             kept[pid]["extra"]["categories"] = dict(tca_cats[pid].most_common())
+    # An area's map extent is its boundary, not its recorded trees: many trees inside are on private land
+    # and not in NParks' records, so the trees can stop short of the edge and the page would cut it off.
+    for f, pid in zip(tca_feats, tca_ids):
+        if int(pid) in kept:
+            kept[int(pid)]["bbox"] = [round(v, 6) for v in shapely.bounds(shapely.force_2d(shape(f["geometry"]))).tolist()]
     tca_geo = extras.area_shapes([(f, kept[int(pid)]["slug"], kept[int(pid)]["name"])
                                   for f, pid in zip(tca_feats, tca_ids) if int(pid) in kept])
 
