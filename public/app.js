@@ -936,8 +936,8 @@ async function openTree(id, fly = true, keepContext = false) {
   ].filter(([, v]) => v);
   openPanel(`
     ${back ? `<button class="linkish" id="back">← Back to ${esc(state.place?.name || state.species?.common || "list")}</button>` : ""}
-    <h2>${esc(s.common || s.scientific || "Tree")}</h2>
-    <p class="sub"><span class="sci">${esc(s.scientific || "")}</span>${s.family ? ` · ${esc(s.family)}` : ""}</p>
+    <div class="panel-head"><h2>${esc(s.common || s.scientific || "Tree")}</h2>
+    <p class="sub"><span class="sci">${esc(s.scientific || "")}</span>${s.family ? ` · ${esc(s.family)}` : ""}</p></div>
     <p><span class="chip"><span class="dot" style="background:${catColor(cat.key)}"></span>${cat.label}</span>
       ${s.native === 1 ? `<span class="chip">Native</span>` : s.native === 0 ? `<span class="chip" ${s.native_src ? 'title="From Kew\'s World Checklist: native range entirely outside Asia"' : ""}>Non-native${s.native_src ? " ·&nbsp;Kew" : ""}</span>` : ""}
       ${t.incorrect ? `<span class="chip" title="Reported as incorrect on Trees.sg">⚠ Reported</span>` : ""}</p>

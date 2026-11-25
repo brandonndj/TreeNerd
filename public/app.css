@@ -91,6 +91,12 @@ a { color: var(--accent); }
   background: var(--surface); }
 #panel-body > h2:first-child { margin-top: -18px; padding-top: 14px; }
 .panel.scrolled h2 { box-shadow: 0 1px 0 var(--border); } /* a divider once content slides under it */
+/* tree pages pin the name and the scientific name together */
+.panel-head { position: sticky; top: -18px; z-index: 2; margin: 2px -18px 10px; padding: 6px 56px 8px 18px; background: var(--surface); }
+#panel-body > .panel-head:first-child { margin-top: -18px; padding-top: 14px; }
+.panel-head h2 { position: static; margin: 0; padding: 0; box-shadow: none !important; background: none; }
+.panel-head .sub { margin: 2px 0 0; }
+.panel.scrolled .panel-head { box-shadow: 0 1px 0 var(--border); }
 .panel h3 { margin: 22px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .panel .sub { color: var(--muted); margin: 0 0 12px; }
 .sci { font-style: italic; }
@@ -307,8 +313,8 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
   .sheet-handle::after { content: ""; position: absolute; left: 50%; top: 10px; width: 40px; height: 5px;
     margin-left: -20px; border-radius: 3px; background: var(--border); }
   .panel-close { top: calc(var(--tap) - 2px); margin: -2px -10px -44px 0; } /* beside the title, under the handle */
-  .panel h2 { top: var(--tap); }
-  #panel-body > h2:first-child { margin-top: 0; padding-top: 4px; }
+  .panel h2, .panel-head { top: var(--tap); }
+  #panel-body > h2:first-child, #panel-body > .panel-head:first-child { margin-top: 0; padding-top: 4px; }
   .panel-close::before { width: 36px; height: 36px; }
   .btn { min-height: var(--tap); }
   .toast { bottom: calc(var(--sheet-offset, 0px) + 16px + var(--safe-b)); }

@@ -284,7 +284,7 @@ test("weather card: every reading names where it's from, lightning first, nothin
   await t.ctx.close();
 });
 
-test("tree page: title and close button stay in view while scrolling; places are one tappable row each", async () => {
+test("tree page: name, scientific name and close button stay in view while scrolling; places are one tappable row each", async () => {
   for (const device of ["iPhone 15 Pro", "iPad Mini"]) {
     const { ctx, page, errors } = await open("/?t=10687021", { ...devices[device], deviceScaleFactor: 1 });
     await page.waitForSelector(".where");
@@ -293,15 +293,18 @@ test("tree page: title and close button stay in view while scrolling; places are
     const at = () => page.evaluate(() => {
       const p = document.querySelector("#panel").getBoundingClientRect(), x = document.querySelector("#close").getBoundingClientRect();
       const h = document.querySelector("#panel-body h2").getBoundingClientRect();
+      const sci = document.querySelector(".panel-head .sci").getBoundingClientRect();
+      const under = document.elementFromPoint(sci.left + 4, (sci.top + sci.bottom) / 2);
       return { xIn: x.top >= p.top - 1 && x.bottom <= p.bottom, hIn: h.top >= p.top - 1 && h.top < p.top + 120,
+        sciShown: sci.top >= h.bottom - 1 && sci.bottom < p.top + 170 && !!under?.closest(".panel-head"),
         xBesideTitle: Math.abs((x.top + x.bottom) / 2 - (h.top + h.bottom) / 2) < 16 };
     });
     const before = await at();
     await page.evaluate(() => { document.querySelector("#panel").scrollTop = 400; });
     await page.waitForTimeout(200);
     const after = await at();
-    assert.ok(before.xIn && before.hIn && before.xBesideTitle, `${device} before: ${JSON.stringify(before)}`);
-    assert.ok(after.xIn && after.hIn && after.xBesideTitle, `${device} after scrolling: ${JSON.stringify(after)}`);
+    assert.ok(before.xIn && before.hIn && before.xBesideTitle && before.sciShown, `${device} before: ${JSON.stringify(before)}`);
+    assert.ok(after.xIn && after.hIn && after.xBesideTitle && after.sciShown, `${device} after scrolling: ${JSON.stringify(after)}`);
     assert.equal(await page.evaluate(() => document.querySelector("#panel").classList.contains("scrolled")), true);
     const rows = await page.$$eval(".where li > button", (bs) => bs.map((b) => ({ h: b.getBoundingClientRect().height, kind: b.dataset.kind })));
     assert.ok(rows.length >= 3 && rows.every((r) => r.h >= 43.5 && r.kind), JSON.stringify(rows));

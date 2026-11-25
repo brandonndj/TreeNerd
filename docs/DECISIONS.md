@@ -51,6 +51,11 @@ records don't say at what height each girth was measured. No fine amount: it cou
 the Act (the statute site refuses automated reads). The page says plainly that most private trees aren't
 on the map, though the rule covers them, so a homeowner doesn't read "no dots" as "no rule".
 
+**Area outlines are NParks' boundaries as published.** Every point is kept (coordinates to about 10 cm).
+A simplified outline was within 3.6 m of NParks' line, but these are legal boundaries and the full
+outlines are only about 80 KB, so there is no reason to redraw them. Which trees are inside is always
+decided against NParks' original boundary.
+
 **The "Conservation" tree type keeps NParks' name, with an explanation.** It's NParks' "conservation
 trees" layer, mostly in nature parks and reserves, and different from the Tree Conservation Areas.
 Renaming it (say, "Nature areas") would be our reading of the data, not NParks' definition.

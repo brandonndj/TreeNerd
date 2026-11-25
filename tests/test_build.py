@@ -100,13 +100,14 @@ if __name__ == "__main__":
 
 
 class AreaShapeTests(unittest.TestCase):
-    def test_outline_keeps_slug_name_and_shape(self):
+    def test_outline_is_the_published_boundary(self):
         from pipeline.extras import area_shapes
-        square = {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [[
-            [103.80, 1.30, 0], [103.80000001, 1.305, 0], [103.80, 1.31, 0], [103.81, 1.31, 0], [103.81, 1.30, 0], [103.80, 1.30, 0]]]}}
-        out = area_shapes([(square, "an-area", "An Area")])
-        f = out["features"][0]
+        ring = [[103.80, 1.30, 0], [103.80000001, 1.305, 0], [103.8000004, 1.31, 0], [103.81, 1.31, 0], [103.81, 1.30, 0], [103.80, 1.30, 0]]
+        square = {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": [ring]}}
+        f = area_shapes([(square, "an-area", "An Area")])["features"][0]
         self.assertEqual(f["properties"], {"s": "an-area", "n": "An Area"})
-        ring = f["geometry"]["coordinates"][0]
-        self.assertEqual(len(ring), 5, "the needless middle point is simplified away, the corners stay")
-        self.assertTrue(all(len(p) == 2 for p in ring), "2D only")
+        out = f["geometry"]["coordinates"][0]
+        self.assertEqual(len(out), len(ring), "every point of the boundary is kept")
+        # the same points (the ring may start at another corner), each within ~10 cm of NParks'
+        for x0, y0, _ in ring:
+            self.assertTrue(any(abs(x - x0) <= 1e-6 and abs(y - y0) <= 1e-6 for x, y in out), (x0, y0))
