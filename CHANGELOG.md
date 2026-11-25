@@ -26,7 +26,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 
 ### Internal
 - The site no longer names the owner's GitHub account: `/status` says the token is "accepted for the repository", and `/.well-known/security.txt` gives the Telegram channel as the contact. A test checks every page and public file for the account name, read from `wrangler.jsonc`.
-- New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); its map extent is the boundary's, not the recorded trees'; `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are NParks' boundaries as published, every point kept (about 80 KB), as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
+- New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); its map extent is the boundary's, not the recorded trees'; `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are NParks' boundaries as published, to about 10 cm (about 80 KB), as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
 
 ## 2026-11-25: Steadier weather readings
 

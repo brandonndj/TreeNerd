@@ -51,7 +51,7 @@ records don't say at what height each girth was measured. No fine amount: it cou
 the Act (the statute site refuses automated reads). The page says plainly that most private trees aren't
 on the map, though the rule covers them, so a homeowner doesn't read "no dots" as "no rule".
 
-**Area outlines are NParks' boundaries as published.** Every point is kept (coordinates to about 10 cm).
+**Area outlines are NParks' boundaries as published.** Coordinates are kept to about 10 cm, so only points closer together than that merge (Central: 2,604 of NParks' 2,621).
 A simplified outline was within 3.6 m of NParks' line, but these are legal boundaries and the full
 outlines are only about 80 KB, so there is no reason to redraw them. Which trees are inside is always
 decided against NParks' original boundary.

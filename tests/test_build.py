@@ -107,7 +107,7 @@ class AreaShapeTests(unittest.TestCase):
         f = area_shapes([(square, "an-area", "An Area")])["features"][0]
         self.assertEqual(f["properties"], {"s": "an-area", "n": "An Area"})
         out = f["geometry"]["coordinates"][0]
-        self.assertEqual(len(out), len(ring), "every point of the boundary is kept")
+        self.assertEqual(len(out), len(ring), "every point of the boundary is kept (none here are within 10 cm of another)")
         # the same points (the ring may start at another corner), each within ~10 cm of NParks'
         for x0, y0, _ in ring:
             self.assertTrue(any(abs(x - x0) <= 1e-6 and abs(y - y0) <= 1e-6 for x, y in out), (x0, y0))

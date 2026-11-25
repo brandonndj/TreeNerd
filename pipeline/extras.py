@@ -93,8 +93,8 @@ def trail_shapes(routes, slugs) -> dict:
 
 def area_shapes(items) -> dict:
     """GeoJSON outlines of areas, for drawing on the map: items are (feature in WGS84, slug, name).
-    NParks' boundary exactly as published (every point kept), with coordinates rounded to 1e-6 degree
-    (about 10 cm). Not simplified: these are legal boundaries, and the full outlines are small."""
+    NParks' boundary as published, with coordinates rounded to 1e-6 degree (about 10 cm), so only
+    points closer together than that merge. Not simplified: these are legal boundaries, and the full outlines are small."""
     feats = []
     for f, slug, name in items:
         g = shapely.set_precision(shapely.force_2d(shape(f["geometry"])), 1e-6)
