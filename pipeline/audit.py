@@ -182,6 +182,20 @@ def plausibility(db: sqlite3.Connection, meta: dict, prev_meta: dict | None) -> 
     if prev_meta and prev_meta.get("tree_count"):
         change = abs(n - prev_meta["tree_count"]) / prev_meta["tree_count"]
         check(change <= 0.10, f"tree count moved {change:.1%} since the previous build ({prev_meta['tree_count']} -> {n})")
+    if prev_meta:
+        # Optional sources (amenities, trails, heritage sites, stations...) are skipped when their download
+        # fails, so a whole layer could vanish quietly. Compare with the previous build instead: a drop of
+        # over 20% stops the update, and the site keeps the previous data until someone looks.
+        before, after = prev_meta.get("place_counts") or {}, meta.get("place_counts") or {}
+        for kind, b in before.items():
+            check(after.get(kind, 0) >= 0.8 * b, f"{after.get(kind, 0)} {kind} places, down from {b} at the previous update (did a source fail to download?)")
+        before, after = prev_meta.get("poi_counts") or {}, meta.get("poi_counts") or {}
+        for cls, b in before.items():
+            if b >= 10:  # small classes come and go
+                check(after.get(cls, 0) >= 0.8 * b, f"{after.get(cls, 0)} {cls} points, down from {b} at the previous update (did a source fail to download?)")
+        if prev_meta.get("trail_trees"):
+            check((meta.get("trail_trees") or 0) >= 0.8 * prev_meta["trail_trees"],
+                  f"{meta.get('trail_trees') or 0} trees on trails, down from {prev_meta['trail_trees']} at the previous update")
     check(one("SELECT count(*) FROM trees WHERE NOT (lat BETWEEN 1.15 AND 1.49 AND lng BETWEEN 103.59 AND 104.10)") == 0,
           "trees outside Singapore")
     check(one("SELECT count(*) FROM trees WHERE girth_m <= 0 OR girth_m > 100") == 0, "girth out of range")

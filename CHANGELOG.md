@@ -5,6 +5,10 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 ## 2026-11-25: Steadier updates and weather
 
 ### Internal
+- Fixed two crashes in the data update that unit tests didn't reach, found by running the full build locally: `write_outputs` used the `extras` module without importing it (method limits) and wrote the Tree Conservation Area outlines without receiving them. `tests/test_names.py` now checks every name a pipeline function uses is defined where it runs.
+- The audit compares each kind of place, each amenity class and the trees on trails with the previous update; a drop of over 20% (a source that failed to download) stops the update instead of publishing without it.
+- Kew's species checklist falls back to the copy kept by the data workflow when Kew can't be reached.
+- `/status` shows whether GitHub still runs the weekly update workflow (it switches off scheduled workflows after 60 days without activity).
 - The missed-update check now asks for the data update whenever the data is over 8 days old (at most once every 20 hours), without also requiring an NParks edit. The decision is `rebuildDue` in `src/schedule.ts`, tested in `tests/schedule.test.mjs`.
 - An NEA reply with HTTP 200 that isn't valid JSON is no longer cached as healthy for 2 minutes: it's backed off for 20 seconds like an error, and `/status` says so.
 

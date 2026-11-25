@@ -737,7 +737,7 @@ def main():
 
     # ---- outputs ---------------------------------------------------------------
     write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report,
-                  stations=stations, density_report=density_report, trail_rows=trail_rows, trail_geo=trail_geo,
+                  stations=stations, density_report=density_report, trail_rows=trail_rows, trail_geo=trail_geo, tca_geo=tca_geo,
                   pois=poi_list)
 
 
@@ -753,7 +753,8 @@ def cell_of(lat, lng):
 
 
 def write_outputs(trees, species, places, road_source, source_edit, t0, enrichment=None, stations=(),
-                  density_report=None, trail_rows=(), trail_geo=None, pois=()):
+                  density_report=None, trail_rows=(), trail_geo=None, pois=(), tca_geo=None):
+    from . import extras  # the method's limits live there (imported here too: main()'s import is local to it)
     log("write: trees.geojsonl (tiles)")
     with open(OUT / "trees.geojsonl", "w") as fh:
         for t in trees:
@@ -860,7 +861,7 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
                for st in stations]
     write_json(OUT / "search.json", search)
     write_json(OUT / "trails.geojson", trail_geo or {"type": "FeatureCollection", "features": []})
-    write_json(OUT / "tca.geojson", tca_geo)
+    write_json(OUT / "tca.geojson", tca_geo or {"type": "FeatureCollection", "features": []})
     write_json(OUT / "species.json", {str(s["id"]): {
         "n": s["common"], "sci": s["scientific"], "fam": s["family"], "nat": s["native"], "c": s["tree_count"]}
         for s in species.values() if s["tree_count"]})

@@ -198,7 +198,16 @@ def fetch_trails():
 def fetch_species_reference():
     """Kew's World Checklist of Vascular Plants: fills species family/origin gaps (see pipeline/enrich.py)."""
     from .enrich import WCVP_ZIP, WCVP_URL
-    WCVP_ZIP.write_bytes(http(WCVP_URL, timeout=900))
+    try:
+        data = http(WCVP_URL, timeout=900)
+    except Exception as e:
+        # Kew's checklist changes a few times a year; the copy kept from a previous run (the data workflow
+        # caches it) is good enough for a week, and far better than stopping the whole update.
+        if WCVP_ZIP.exists() and WCVP_ZIP.stat().st_size > 10_000_000:
+            log(f"WCVP: download failed ({e}); using the copy from a previous run")
+            return
+        raise
+    WCVP_ZIP.write_bytes(data)
     log(f"WCVP: {WCVP_ZIP.stat().st_size / 1e6:.0f} MB")
 
 

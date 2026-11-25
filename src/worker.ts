@@ -828,7 +828,7 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
 
   // ---- live checks, all at once
   const feeds = Object.keys(FEEDS) as Feed[];
-  const [neaRes, arcgis, onemapSearch, basemap, github] = await Promise.all([
+  const [neaRes, arcgis, onemapSearch, basemap, github, workflow] = await Promise.all([
     Promise.all(feeds.map((f) => timed((signal) => neaFetch(f, env, ctx, signal)))),
     timed(async (signal) => {
       const r = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: ua, signal });
@@ -845,6 +845,13 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
       if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) return null;
       return (await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}`, {
         headers: { ...ua, authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json" }, signal })).status;
+    }),
+    // GitHub switches off scheduled workflows after 60 days without activity in a public repository
+    timed(async (signal) => {
+      if (!env.GITHUB_TOKEN || !env.GITHUB_REPO || !env.GITHUB_WORKFLOW) return null;
+      const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW}`, {
+        headers: { ...ua, authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json" }, signal });
+      return r.ok ? ((await r.json<{ state?: string }>()).state ?? "unknown") : `HTTP ${r.status}`;
     }),
   ]);
 
@@ -901,6 +908,12 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
     { name: "NEA alert", level: neaAlerted ? "fail" : neaSince ? "warn" : "ok",
       detail: neaAlerted ? `issue opened ${ago(Number(neaAlerted), now)}; problem since ${ago(Number(neaSince), now)}`
         : neaSince ? `a problem started ${ago(Number(neaSince), now)}; an issue opens if it lasts an hour` : "no open problem" },
+    { name: "Weekly update workflow (GitHub)", ms: workflow.ms,
+      level: !set(env.GITHUB_TOKEN) ? "off" : workflow.value === "active" ? "ok" : "fail",
+      detail: !set(env.GITHUB_TOKEN) ? "can't be checked without the GitHub token"
+        : workflow.value === "active" ? "switched on, runs every Sunday"
+        : workflow.value === "disabled_inactivity" ? "switched off by GitHub after 60 days without activity: re-enable it in the repository's Actions tab"
+        : workflow.value ? `GitHub reports it as ${workflow.value}` : `couldn't be checked: ${workflow.error}` },
     !freshLast ? notYet(6 * 3600_000, "Freshness check (every 6 h)")
       : { name: "Freshness check (every 6 h)", level: now - Number(freshLast) > 7 * 3600_000 ? "fail" : "ok",
         detail: `last ran ${ago(Number(freshLast), now)}${lastDispatch ? `; last asked for a rebuild ${ago(Number(lastDispatch), now)}` : ""}` },

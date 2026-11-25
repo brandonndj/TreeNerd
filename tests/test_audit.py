@@ -116,6 +116,28 @@ class PlausibilityTests(unittest.TestCase):
         self.assertIn("since the previous build", self.problems([t], prev={"tree_count": 1000}))
 
 
+class PreviousBuildTests(unittest.TestCase):
+    """A source that quietly failed to download must stop the update, not publish a site without it."""
+
+    def problems(self, meta_extra, prev):
+        t = [(100, 103.83, 1.30, 1, 1.0, "6-9", "street", 100.0, None), (101, 103.84, 1.30, 1, 2.0, "9-12", "street", 200.0, None)]
+        meta = {**META, "tree_count": 2, **meta_extra}
+        return "\n".join(audit.plausibility(make_db(trees=t), meta, {"tree_count": 2, **prev}))
+
+    def test_steady_counts_pass(self):
+        same = {"place_counts": {"road": 100, "trail": 40}, "poi_counts": {"Toilet": 130, "Hawker centre": 120}, "trail_trees": 9000}
+        got = self.problems(same, same)
+        self.assertNotIn("previous update", got)
+
+    def test_a_missing_layer_is_caught(self):
+        prev = {"place_counts": {"road": 100, "trail": 40}, "poi_counts": {"Toilet": 130, "Hawker centre": 120, "Jetty": 5}, "trail_trees": 9000}
+        now = {"place_counts": {"road": 100}, "poi_counts": {"Toilet": 130}, "trail_trees": 0}
+        got = self.problems(now, prev)
+        for expected in ("0 trail places, down from 40", "0 Hawker centre points, down from 120", "0 trees on trails, down from 9000"):
+            self.assertIn(expected, got)
+        self.assertNotIn("Jetty", got, "classes under 10 may come and go")
+
+
 class SourceCheckTests(unittest.TestCase):
     def feature(self, tid, **props):
         return {"properties": {"Public_treeid": tid, "SPCS_CD": 1, "GRTH_SIZE": 1.0, "HEIGHT": "6m - 9m", **props},

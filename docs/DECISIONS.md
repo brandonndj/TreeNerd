@@ -152,6 +152,21 @@ It used to require an NParks edit too, so a skipped run in a quiet week left the
 overdue" with nothing to fix it, while other sources (data.gov.sg, roads) may have changed. The cost is
 the update that was missed, not an extra one; a run that keeps failing still opens an issue each time.
 
+**A layer that vanishes stops the update.** Optional sources (amenities, trails, heritage sites,
+stations, census) are skipped when their download fails, so the audit compares each kind of place, each
+amenity class (10 or more) and the trees on trails with the previous update: a drop of over 20% stops
+it, and the site keeps the previous data. A real drop that large is rare enough to want a person to look.
+
+**Kew's checklist has a fallback.** The data workflow keeps the last copy (GitHub cache); if Kew can't be
+reached, that copy is used rather than stopping the update. It changes a few times a year.
+
+**/status shows whether GitHub still runs the weekly update.** GitHub switches off scheduled workflows
+after 60 days without activity in a public repository, which would stop updates silently.
+
+**Subzones are from the 2019 Master Plan, planning areas from 2025.** No 2025 subzones are published
+yet, and the 2020 census counts residents by 2019 subzone. 185 trees (0.02%, 22 Nov 2026) sit in a 2019
+subzone that straddles a 2025 planning-area boundary.
+
 **A bad NEA reply is never cached as healthy.** A reply is checked to be valid data before it's cached
 for 2 minutes; one that isn't is treated like an error (cached for 20 seconds, so callers back off
 instead of all asking again at once).
