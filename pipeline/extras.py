@@ -30,6 +30,8 @@ FACILITY_CLASSES = {
 }
 # A ratio over a handful of residents means nothing (Tengah had 10 in 2020), so areas below this get none.
 MIN_RESIDENTS = 1000
+# The census the resident figures come from (the file fetched is dgs_population_subzone_<year>.csv).
+RESIDENTS_YEAR = 2020
 
 
 def _lines(feats):
@@ -102,10 +104,12 @@ def _https(url):
 
 def pois() -> list[dict]:
     """Park amenities (NParks), hawker centres (NEA), historic sites and national monuments (NHB)."""
-    out = []
+    out, skipped = [], Counter()
     for f in load("dgs_park_facilities.geojson"):
         p = f["properties"]
         label = FACILITY_CLASSES.get((p.get("CLASS") or "").strip().upper())
+        if not label:
+            skipped[(p.get("CLASS") or "").strip().upper() or "(none)"] += 1
         if label and f["geometry"]["type"] == "Point":
             # NParks' own labels vary ("-", "seesaw", "Blk3 with toilet"), so the type is the name
             # and their label, when it says something, is the description.
@@ -130,6 +134,9 @@ def pois() -> list[dict]:
                         "geometry": f["geometry"]})
     out = [p for p in out if p["name"] and p["geometry"]["type"] == "Point"]
     log(f"  points of interest: {dict(Counter(p['class'] for p in out).most_common())}")
+    # Classes left out on purpose (car parks, notice boards...) and any new ones NParks adds: review
+    # this line when it changes, and add a class to FACILITY_CLASSES if visitors would want it.
+    log(f"  park facility classes not shown: {dict(skipped.most_common())}")
     return out
 
 
@@ -140,8 +147,8 @@ def _num(v):
 
 
 def residents() -> dict[tuple[str, str], int]:
-    """Resident population (Census 2020) by ('planning_area', name) and ('subzone', planning area, name)."""
-    path = RAW / "dgs_population_subzone_2020.csv"
+    """Resident population (census of RESIDENTS_YEAR) by ('planning_area', name) and ('subzone', planning area, name)."""
+    path = RAW / f"dgs_population_subzone_{RESIDENTS_YEAR}.csv"
     if not path.exists():
         log("  (resident population missing, skipped)")
         return {}
@@ -172,7 +179,7 @@ def apply_residents(places, pops) -> int:
         people = pops.get(key)
         if people:
             p["extra"]["residents"] = people
-            p["extra"]["residents_year"] = 2020
+            p["extra"]["residents_year"] = RESIDENTS_YEAR
             if people >= MIN_RESIDENTS:  # see MIN_RESIDENTS
                 p["extra"]["trees_per_1000_residents"] = round(p["tree_count"] / people * 1000, 1)
                 n += 1

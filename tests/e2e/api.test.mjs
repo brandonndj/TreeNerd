@@ -145,13 +145,21 @@ test("points of interest: nearby, sorted, labelled by source", async () => {
   assert.equal((await getJson("/api/place/road/orchard-road")).pois, null, "roads have no amenity list");
 });
 
-test("air temperature: nearest station or nothing, never a guess", async () => {
+test("weather: nearest reading or nothing, never a guess or a stale copy", async () => {
   assert.equal((await get("/api/weather?lat=48.85&lng=2.35")).status, 400);
   const w = await getJson("/api/weather?lat=1.299&lng=103.846");
   if (w.reading) { // the test machine may not reach NEA; when it does, the reading must be complete
     assert.ok(Number.isFinite(w.reading.celsius) && w.reading.station && w.reading.dist_m >= 0);
     assert.ok(Date.now() - Date.parse(w.reading.at) < 30 * 60_000);
   } else assert.equal(w.reading, null);
+  // every live field is present (null when NEA has nothing fresh), and the reply is never kept stale
+  for (const k of ["heat", "forecast", "rain", "lightning", "uv", "air"]) assert.ok(k in w, k);
+  if (w.heat) assert.ok(["Low", "Moderate", "High"].includes(w.heat.level) && Date.now() - Date.parse(w.heat.at) < 45 * 60_000);
+  if (w.forecast) assert.ok(Date.parse(w.forecast.until) > Date.now() && w.forecast.area);
+  if (w.rain) assert.ok(w.rain.mm > 0 && w.rain.station);
+  if (w.lightning) assert.ok(w.lightning.dist_m <= 10_000);
+  if (w.air) assert.ok(["Normal", "Elevated", "High", "Very high"].includes(w.air.band) && w.air.region);
+  assert.equal((await get("/api/weather?lat=1.299&lng=103.846")).headers.get("cache-control"), "public, max-age=60");
 });
 
 test("tiles: TileJSON, a tile with trees, an empty tile, a bad address", async () => {
@@ -210,4 +218,23 @@ test("the dev preview host is kept out of search engines; the real host isn't", 
   const live = await asHost("treenerd.fyi", "/");
   assert.equal(live.headers["x-robots-tag"], undefined);
   assert.match((await asHost("treenerd.fyi", "/robots.txt")).body, /Allow: \//);
+});
+
+test("status page: every dependency listed, not indexed, no secrets", async () => {
+  const r = await get("/status");
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  assert.match(r.headers.get("x-robots-tag"), /noindex/);
+  const html = await r.text();
+  for (const s of ["Data", "NEA weather feeds", "Other services", "Keys and tokens", "Scheduled jobs", "NEA air", "OneMap address search",
+    "data.gov.sg API key (Worker)", "GitHub token", "Hourly NEA check"]) assert.ok(html.includes(s), s);
+  const j = await getJson("/status.json");
+  assert.ok(["ok", "warn", "fail"].includes(j.overall));
+  assert.equal(j.sections.find((s) => s.title === "NEA weather feeds").checks.length, 7);
+  for (const c of j.sections.flatMap((s) => s.checks)) assert.ok(["ok", "warn", "fail", "off"].includes(c.level) && c.detail, JSON.stringify(c));
+  // the test Worker has no secrets: each shows as not set, never a value
+  const keys = j.sections.find((s) => s.title === "Keys and tokens").checks;
+  assert.match(keys.find((c) => c.name.startsWith("data.gov.sg")).detail, /^not set/);
+  assert.doesNotMatch(await (await get("/robots.txt")).text(), /^Allow: \/status/m);
+  assert.match(await (await get("/robots.txt")).text(), /Disallow: \/status/);
 });

@@ -2,6 +2,45 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-24: Weather now, and colours for colour-blind visitors
+
+### Added
+- The temperature card is now a weather card with live NEA readings, each showing where it's from and when:
+  - Heat stress at the nearest station, with NEA's rating (low, moderate or high).
+  - The 2-hour forecast for the area.
+  - Rain at the nearest rain gauge, shown while it's raining there.
+  - Lightning, shown when NEA records a strike within 10 km in the last 15 minutes.
+  - The UV index (measured at Changi, one reading for Singapore), in the daytime.
+  - Air quality: the latest 1-hour PM2.5 reading for the nearest NEA region (north, south, east, west or central), with NEA's band and its advice when the air isn't normal.
+- The weather card now also appears on tree pages, planning areas, subzones and roads up to 3 km across, as well as parks and the area around any spot. It says where its distances are measured from.
+
+### Changed
+- The map's "Show" panel is now called "Tree types". Even when it's closed, it shows the colour of each type and how many trees are on the map. If some types are switched off, it says so (for example "4 of 6 types") with their dots shown as hollow rings, and a "Show all" link switches them all back on.
+- New map colours that stay easy to tell apart with red-green colour blindness (and blue-yellow too), in light and dark mode. Before, botanic-garden and conservation-area trees looked almost the same to some people, as did native and non-native species.
+- Park amenities, hawker centres and heritage sites are now hollow rings on the map, each kind in its own colour, so they no longer look like tree dots.
+- Trails and the selected-tree ring are now dark blue (white in dark mode), apart from every tree colour.
+
+### Fixed
+- The site no longer says it shows "every tree in Singapore". It shows the trees NParks records (the current count is in the About panel); forest trees, such as those in the nature reserves, aren't recorded one by one.
+- Weather distances under 1 km are shown to the nearest 100 m, matching how precisely the location is looked up.
+- Rankings say how many places they list ("Top 12") instead of always "Top 25", which was wrong when fewer qualified.
+- The About panel's explanations (how far a tree can be from a road or trail, the census year, the carbon limit) now come from the latest data update, so they can't fall out of step with it.
+
+### Internal
+- Each build publishes its method limits in `meta.method`; the app reads them, falling back to the pipeline's defaults for older builds (`tests/test_method.py` keeps the two in step). The fixed tree count is gone from page descriptions. The build logs park facility classes it doesn't show, so new ones are noticed. Reasons for design and data choices are now in `docs/DECISIONS.md`.
+- An hourly Worker check of NEA's feeds opens a GitHub issue (workflow `nea-alert.yml`) when one has been failing for over an hour, and closes it on recovery. It needs the Worker's `GITHUB_TOKEN` secret to be able to run workflows (the same permission the missed-update rebuild uses). NEA requests send the Worker secret `DATAGOVSG_API_KEY` if it's set.
+- The link-preview image is redrawn by `tools/og_image.cjs`, without a tree count.
+- `/api/weather` keeps `reading` (air temperature) as before and adds `heat`, `forecast`, `rain`, `lightning`, `uv` and `air`, each null without a fresh reading; one failing feed doesn't hide the others. Its replies are no longer kept stale in browsers. Parsing is in `src/weather.ts`, tested against NEA responses saved on 24 Nov.
+- `tests/test_colours.py` reads the colours from `public/app.css` and `public/app.js`, simulates protanopia, deuteranopia and tritanopia (Machado et al. 2009) and fails if any two colours that carry meaning come within CIEDE2000 ΔE 15 of each other. `tools/colours.py` prints a report.
+
+## 2026-11-23: Temperature card, and corrections
+
+### Changed
+- The live air temperature is now a card near the top of park pages and "near" views: a large reading, the NEA station it comes from, how far away it is, and when it was taken. The card's colour runs from blue to red on Singapore's own scale: dark blue under 26 °C, light blue to 29 °C, yellow to 31 °C, orange to 33 °C, dark red above.
+
+### Fixed
+- The About panel said trees in parks are listed under the park. In fact a park tree within 30 m of a named road counts for both the road and the park (about 29% of park trees), so it appears on both pages. The text now says so.
+
 ## 2026-11-22: Trails, amenities, heritage and more
 
 ### Added

@@ -9,6 +9,8 @@
 import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
 import { serveTiles } from "./tiles";
+import { type Check, type Level, type Report, ago, overall, renderStatus } from "./status";
+import { FEEDS, type Feed, air, feedProblems, forecast, heat, lightning, rain, temperature, uv } from "./weather";
 import { SearchIndex, type Entry } from "./search";
 
 export interface Env {
@@ -23,6 +25,7 @@ export interface Env {
   GITHUB_REF: string;
   ARCGIS_TREES_LAYER: string;
   GITHUB_TOKEN?: string;
+  DATAGOVSG_API_KEY?: string; // optional secret: data.gov.sg key, sent with NEA requests for higher rate limits
   ONEMAP_EMAIL?: string; // optional secrets: OneMap account used for address search
   ONEMAP_PASSWORD?: string;
 }
@@ -465,58 +468,74 @@ async function apiTop(url: URL, env: Env) {
   return json({ kind, by, places: results }, 200, 21600);
 }
 
-// ---------------------------------------------------------------- live air temperature (NEA)
-const AIR_TEMP = "https://api-open.data.gov.sg/v2/real-time/api/air-temperature";
-interface NeaStation { id: string; name: string; location?: { latitude: number; longitude: number } }
-interface NeaReading { timestamp: string; data: { stationId: string; value: number }[] }
-
-/**
- * The latest air temperature at the NEA weather station nearest a point. One upstream request per
- * two minutes at most, whoever asks (edge-cached). Readings older than 30 minutes are not shown.
- */
-async function apiWeather(url: URL, ctx: ExecutionContext) {
-  const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
-  if (!(lat > 1.1 && lat < 1.5 && lng > 103.5 && lng < 104.2)) throw new HttpError(400, "location must be in Singapore");
-  const cache = caches.default, key = new Request(AIR_TEMP);
+// ---------------------------------------------------------------- live conditions (NEA)
+/** One NEA feed, from the edge cache (two minutes) or upstream; null if NEA can't be reached. */
+const neaHeaders = (env: Env): Record<string, string> => ({
+  "user-agent": "TreeNerd (+https://treenerd.fyi)", ...(env.DATAGOVSG_API_KEY ? { "x-api-key": env.DATAGOVSG_API_KEY } : {}),
+});
+async function neaFeed(feed: Feed, env: Env, ctx: ExecutionContext): Promise<unknown> {
+  const cache = caches.default, key = new Request(FEEDS[feed]);
   let res = await cache.match(key);
   if (!res) {
     try {
-      const up = await fetch(AIR_TEMP, { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
+      const up = await fetch(FEEDS[feed], { headers: neaHeaders(env) });
       if (!up.ok) throw new Error(`NEA returned ${up.status}`);
       res = new Response(await up.text(), { headers: { "content-type": "application/json", "cache-control": "public, max-age=120" } });
       ctx.waitUntil(cache.put(key, res.clone()));
     } catch (e) {
-      console.error("air temperature unavailable:", String(e));
-      return json({ reading: null }, 200, 60);
+      console.error(`NEA ${feed} unavailable:`, String(e));
+      return null;
     }
   }
-  const d = (await res.json<{ data?: { stations?: NeaStation[]; readings?: NeaReading[] } }>()).data;
-  const latest = d?.readings?.[0];
-  const values = new Map((latest?.data ?? []).map((r) => [r.stationId, r.value]));
-  const nearest = (d?.stations ?? [])
-    .filter((s) => s.location && values.has(s.id) && Number.isFinite(values.get(s.id)))
-    .map((s) => ({ s, dist_m: Math.round(haversine(lat, lng, s.location!.latitude, s.location!.longitude)) }))
-    .sort((a, b) => a.dist_m - b.dist_m)[0];
-  const at = latest ? Date.parse(latest.timestamp) : NaN;
-  if (!nearest || !Number.isFinite(at) || Date.now() - at > 30 * 60_000) return json({ reading: null }, 200, 60);
-  return json({
-    reading: { celsius: values.get(nearest.s.id), station: nearest.s.name, dist_m: nearest.dist_m, at: latest!.timestamp },
+  try { return await res.json(); } catch { return null; }
+}
+
+/**
+ * Live conditions near a point: air temperature (`reading`, unchanged for older pages), heat stress,
+ * the 2-hour forecast, rain now, lightning, UV and PM2.5 (see src/weather.ts). Each is null when NEA
+ * has no fresh reading; one failing feed never hides the others. At most one upstream request per
+ * feed every two minutes, whoever asks.
+ */
+async function apiWeather(url: URL, env: Env, ctx: ExecutionContext) {
+  const lat = Number(url.searchParams.get("lat")), lng = Number(url.searchParams.get("lng"));
+  if (!(lat > 1.1 && lat < 1.5 && lng > 103.5 && lng < 104.2)) throw new HttpError(400, "location must be in Singapore");
+  const names = Object.keys(FEEDS) as Feed[];
+  const feeds = Object.fromEntries(names.map((f, i) => [f, i])) as Record<Feed, number>;
+  const got = await Promise.all(names.map((f) => neaFeed(f, env, ctx)));
+  const now = Date.now(), d = (f: Feed) => got[feeds[f]];
+  const safe = <T>(fn: () => T) => { try { return fn(); } catch (e) { console.error("NEA parse:", String(e)); return null; } };
+  const body = {
+    reading: safe(() => temperature(d("temperature"), lat, lng, now)),
+    heat: safe(() => heat(d("heat"), lat, lng, now)),
+    forecast: safe(() => forecast(d("forecast"), lat, lng, now)),
+    rain: safe(() => rain(d("rain"), lat, lng, now)),
+    lightning: safe(() => lightning(d("lightning"), lat, lng, now)),
+    uv: safe(() => uv(d("uv"), now)),
+    air: safe(() => air(d("air"), lat, lng, now)),
     source: "National Environment Agency, via data.gov.sg",
-  }, 200, 60);
+  };
+  // live readings: no stale copies in browsers (json() would allow a day of stale-while-revalidate)
+  const res = json(body, 200, 60);
+  res.headers.set("cache-control", "public, max-age=60");
+  return res;
 }
 
 // ---------------------------------------------------------------- address search (OneMap)
 const ONEMAP = "https://www.onemap.gov.sg";
 let onemapToken: { value: string; exp: number } | null = null;
 
-/** Token from the configured OneMap account, cached until shortly before it expires. */
-async function getOnemapToken(env: Env, force = false) {
+/**
+ * Token from the configured OneMap account, cached until shortly before it expires. `signal` lets a
+ * caller with a time limit (the status page) abort the sign-in.
+ */
+async function getOnemapToken(env: Env, force = false, signal?: AbortSignal) {
   if (!env.ONEMAP_EMAIL || !env.ONEMAP_PASSWORD) return null;
   if (!force && onemapToken && onemapToken.exp - Date.now() > 3600_000) return onemapToken.value;
   const res = await fetch(`${ONEMAP}/api/auth/post/getToken`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email: env.ONEMAP_EMAIL, password: env.ONEMAP_PASSWORD }),
+    signal,
   });
   if (!res.ok) { console.error("OneMap token request failed:", res.status); return null; }
   const d = await res.json<{ access_token?: string; expiry_timestamp?: string | number }>();
@@ -561,7 +580,7 @@ async function api(env: Env, url: URL, ctx: ExecutionContext): Promise<Response>
   if (p[0] === "search") return apiSearch(url, env);
   if (p[0] === "near") return apiNear(url, env);
   if (p[0] === "top") return apiTop(url, env);
-  if (p[0] === "weather" && p.length === 1) return apiWeather(url, ctx);
+  if (p[0] === "weather" && p.length === 1) return apiWeather(url, env, ctx);
   if (p[0] === "changes" && p.length === 1) return apiChanges(env);
   if (p[0] === "geocode") return apiGeocode(url, env);
   if (p[0] === "tree" && ID_RE.test(p[1] ?? "") && p.length === 2) return apiTree(env, Number(p[1]));
@@ -634,6 +653,8 @@ async function data(request: Request, env: Env, url: URL) {
 
 // ---------------------------------------------------------------- cron: freshness check
 async function checkForNewData(env: Env) {
+  // what the status page shows as the last freshness check (one row, ~120 writes a month)
+  await env.DB.prepare("INSERT OR REPLACE INTO meta VALUES ('freshness_last_check', ?)").bind(String(Date.now())).run().catch(() => {});
   const res = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
   if (!res.ok) throw new Error(`upstream returned ${res.status}`);
   const layer = await res.json<{ editingInfo?: { lastEditDate?: number } }>();
@@ -670,6 +691,181 @@ async function checkForNewData(env: Env) {
   }
 }
 
+// ---------------------------------------------------------------- cron: NEA feed check
+const NEA_CRON = "43 * * * *";
+const NEA_ALERT_AFTER = 3600_000; // a problem must last this long: NEA has brief gaps
+const NEA_ALERT_EVERY = 24 * 3600_000; // while it lasts, remind at most once a day
+/**
+ * Hourly: fetch every NEA feed and check it still gives what the weather card needs (feedProblems).
+ * A problem lasting over an hour runs the "NEA feed alert" workflow, which opens an issue; recovery
+ * runs it again to close the issue. State is two rows in the meta table, written only when it changes.
+ * Cost: 7 requests an hour to NEA; no database writes while all is well.
+ */
+async function checkNea(env: Env) {
+  const names = Object.keys(FEEDS) as Feed[];
+  const got = await Promise.all(names.map(async (f) => {
+    for (let i = 0; i < 2; i++) {
+      try {
+        const r = await fetch(FEEDS[f], { headers: neaHeaders(env) });
+        if (r.ok) return [f, await r.json()] as const;
+      } catch { /* try once more */ }
+    }
+    return [f, null] as const;
+  }));
+  const problems = feedProblems(Object.fromEntries(got), Date.now());
+  // what the status page shows as the last hourly check (one row, ~720 writes a month)
+  await env.DB.prepare("INSERT OR REPLACE INTO meta VALUES ('nea_last_check', ?)").bind(JSON.stringify({ at: Date.now(), problems })).run().catch(() => {});
+  const get = async (k: string) => (await env.DB.prepare("SELECT value FROM meta WHERE key=?").bind(k).first<{ value: string }>().catch(() => null))?.value;
+  const put = (k: string, v: string | null) => (v === null
+    ? env.DB.prepare("DELETE FROM meta WHERE key=?").bind(k) : env.DB.prepare("INSERT OR REPLACE INTO meta VALUES (?, ?)").bind(k, v)).run();
+  const since = Number(await get("nea_problem_since") ?? 0), alerted = Number(await get("nea_alerted_at") ?? 0);
+  if (!problems.length) {
+    if (since) await put("nea_problem_since", null);
+    if (alerted) {
+      console.log("NEA feeds have recovered");
+      if (await dispatchNeaAlert(env, "recovered", "All NEA feeds give readings again.")) await put("nea_alerted_at", null);
+    }
+    return;
+  }
+  console.error("NEA feed problem:", problems.join("; "));
+  if (!since) return void await put("nea_problem_since", String(Date.now()));
+  if (Date.now() - since < NEA_ALERT_AFTER || Date.now() - alerted < NEA_ALERT_EVERY) return;
+  const hours = Math.round((Date.now() - since) / 3600_000);
+  if (await dispatchNeaAlert(env, "problem", `For about ${hours} h: ${problems.join("; ")}`)) await put("nea_alerted_at", String(Date.now()));
+}
+
+async function dispatchNeaAlert(env: Env, status: "problem" | "recovered", details: string) {
+  if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) { console.warn("NEA alert not sent: GITHUB_TOKEN is not set"); return false; }
+  const gh = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/nea-alert.yml/dispatches`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json",
+      "user-agent": "TreeNerd (+https://treenerd.fyi)", "content-type": "application/json" },
+    body: JSON.stringify({ ref: env.GITHUB_REF || "main", inputs: { status, details: details.slice(0, 900) } }),
+  });
+  console.log(`NEA alert (${status}) sent:`, gh.status);
+  return gh.ok;
+}
+
+// ---------------------------------------------------------------- /status (owner's page; not linked or indexed)
+let statusCache: { at: number; report: Report } | null = null;
+
+/** Run fn with a time limit; returns its result, how long it took, or the error. */
+async function timed<T>(fn: (signal: AbortSignal) => Promise<T>, ms = 8000) {
+  const t0 = Date.now(), ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+  try { return { value: await fn(ctl.signal), ms: Date.now() - t0, error: null as string | null }; }
+  catch (e) { return { value: null, ms: Date.now() - t0, error: ctl.signal.aborted ? `no answer in ${ms / 1000} s` : String(e) }; }
+  finally { clearTimeout(timer); }
+}
+
+async function statusReport(env: Env): Promise<Report> {
+  if (statusCache && Date.now() - statusCache.at < 30_000) return statusCache.report;
+  const now = Date.now(), fmtN = new Intl.NumberFormat("en-SG");
+  const meta = await getMeta(env);
+  const stored = async (k: string) => (await env.DB.prepare("SELECT value FROM meta WHERE key=?").bind(k).first<{ value: string }>().catch(() => null))?.value ?? null;
+  const present = async (name: string, ext: string) => {
+    for (const key of slotKeys(name, ext)) if (await env.DATA.head(key).catch(() => null)) return true;
+    return false;
+  };
+  const ua = { "user-agent": "TreeNerd (+https://treenerd.fyi)" };
+
+  // ---- data
+  const builtAt = meta?.built_at ? Date.parse(String(meta.built_at)) : NaN;
+  const ageDays = Number.isFinite(builtAt) ? (now - builtAt) / 86400_000 : null;
+  const dbOk = await env.DB.prepare("SELECT 1 FROM trees LIMIT 1").first().then((r) => !!r, () => false);
+  const [searchOk, tilesOk] = await Promise.all([present("search", "json"), present("trees", "pmtiles")]);
+  const data: Check[] = [
+    { name: "Database", level: dbOk ? "ok" : "fail", detail: dbOk ? `live copy: ${active.which.toUpperCase()}` : "no trees found" },
+    { name: "Data update", level: ageDays === null ? "fail" : ageDays > STALE_AFTER_DAYS ? "fail" : ageDays > 8 ? "warn" : "ok",
+      detail: ageDays === null ? "no build found" : `built ${ago(builtAt, now)} (${String(meta!.built_at).slice(0, 10)}); ${fmtN.format(Number(meta?.tree_count) || 0)} trees; updates weekly` },
+    { name: "NParks records", level: meta?.source_last_edit ? "ok" : "warn",
+      detail: meta?.source_last_edit ? `last edited by NParks ${ago(Date.parse(String(meta.source_last_edit)), now)}, as seen at the last update` : "not recorded" },
+    { name: "Search index", level: searchOk ? "ok" : "fail", detail: searchOk ? "present" : "missing" },
+    { name: "Map tiles", level: tilesOk ? "ok" : "fail", detail: tilesOk ? "present" : "missing" },
+  ];
+
+  // ---- live checks, all at once
+  const feeds = Object.keys(FEEDS) as Feed[];
+  const [neaRes, arcgis, onemapSearch, basemap, github] = await Promise.all([
+    Promise.all(feeds.map((f) => timed(async (signal) => {
+      const r = await fetch(FEEDS[f], { headers: neaHeaders(env), signal });
+      return { status: r.status, body: r.ok ? await r.json() : null };
+    }))),
+    timed(async (signal) => {
+      const r = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: ua, signal });
+      return { status: r.status, edit: r.ok ? (await r.json<{ editingInfo?: { lastEditDate?: number } }>()).editingInfo?.lastEditDate : undefined };
+    }),
+    timed(async (signal) => {
+      const token = await getOnemapToken(env, false, signal); // the sign-in counts toward the time limit too
+      const r = await fetch(`${ONEMAP}/api/common/elastic/search?searchVal=238823&returnGeom=N&getAddrDetails=N&pageNum=1`,
+        { headers: { ...ua, ...(token ? { authorization: token } : {}) }, signal });
+      return { status: r.status, token: !!token };
+    }),
+    timed(async (signal) => (await fetch(`${ONEMAP}/maps/tiles/Grey/12/3230/2033.png`, { headers: ua, signal })).status),
+    timed(async (signal) => {
+      if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) return null;
+      return (await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}`, {
+        headers: { ...ua, authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json" }, signal })).status;
+    }),
+  ]);
+
+  const problems = feedProblems(Object.fromEntries(feeds.map((f, i) => [f, neaRes[i].value?.body ?? null])), now);
+  const nea: Check[] = feeds.map((f, i) => {
+    const r = neaRes[i], p = problems.find((x) => x.startsWith(`${f}:`));
+    const level: Level = r.error || !r.value || r.value.status !== 200 ? "fail" : p ? "warn" : "ok";
+    const detail = r.error ? `unreachable: ${r.error}` : r.value!.status !== 200
+      ? `HTTP ${r.value!.status}${r.value!.status === 401 || r.value!.status === 403 ? " (is the API key valid?)" : r.value!.status === 429 ? " (rate limited)" : ""}`
+      : p ? p.slice(f.length + 2) : "giving readings";
+    return { name: `NEA ${f}`, level, detail, ms: r.ms };
+  });
+  const [neaLast, neaSince, neaAlerted, freshLast, lastDispatch] = await Promise.all(
+    ["nea_last_check", "nea_problem_since", "nea_alerted_at", "freshness_last_check", "last_dispatch"].map(stored));
+  const neaLastParsed = (() => { try { return neaLast ? JSON.parse(neaLast) as { at: number; problems: string[] } : null; } catch { return null; } })();
+
+  const services: Check[] = [
+    { name: "NParks tree layer (ArcGIS)", level: arcgis.error || arcgis.value?.status !== 200 ? "fail" : "ok", ms: arcgis.ms,
+      detail: arcgis.error ? `unreachable: ${arcgis.error}` : arcgis.value!.status !== 200 ? `HTTP ${arcgis.value!.status}`
+        : `reachable; NParks last edited ${ago(arcgis.value!.edit, now)}` },
+    { name: "OneMap address search", level: onemapSearch.error || onemapSearch.value?.status !== 200 ? "fail" : "ok", ms: onemapSearch.ms,
+      detail: onemapSearch.error ? `unreachable: ${onemapSearch.error}` : onemapSearch.value!.status !== 200 ? `HTTP ${onemapSearch.value!.status}`
+        : onemapSearch.value!.token ? "working, signed in with the OneMap account" : "working, without an account" },
+    { name: "OneMap basemap", level: basemap.error || basemap.value !== 200 ? "fail" : "ok", ms: basemap.ms,
+      detail: basemap.error ? `unreachable: ${basemap.error}` : basemap.value !== 200 ? `HTTP ${basemap.value}` : "tiles loading (visitors' browsers fetch these directly)" },
+  ];
+
+  const set = (v?: string) => !!v && v.length > 0;
+  const keys: Check[] = [
+    { name: "data.gov.sg API key (Worker)", level: set(env.DATAGOVSG_API_KEY) ? (nea.some((c) => /API key/.test(c.detail)) ? "fail" : "ok") : "off",
+      detail: set(env.DATAGOVSG_API_KEY) ? "set, and sent with every NEA request" : "not set: NEA is used without a key (optional; the weekly data update has its own key in GitHub)" },
+    { name: "OneMap account", level: set(env.ONEMAP_EMAIL) && set(env.ONEMAP_PASSWORD) ? (onemapSearch.value?.token ? "ok" : "fail") : "off",
+      detail: set(env.ONEMAP_EMAIL) && set(env.ONEMAP_PASSWORD) ? (onemapSearch.value?.token ? "set, and signing in works" : "set, but signing in failed") : "not set (optional)" },
+    { name: "GitHub token", level: !set(env.GITHUB_TOKEN) ? "warn" : github.value === 200 ? "ok" : "fail", ms: set(env.GITHUB_TOKEN) ? github.ms : undefined,
+      detail: !set(env.GITHUB_TOKEN) ? "not set: a missed weekly update won't be retried and NEA alerts can't open issues"
+        : github.value === 200 ? `set, and accepted for ${env.GITHUB_REPO}` : `set, but GitHub answered ${github.value ?? github.error}` },
+  ];
+
+  const jobs: Check[] = [
+    { name: "Hourly NEA check", level: !neaLastParsed ? "warn" : now - neaLastParsed.at > 2.5 * 3600_000 ? "fail" : neaLastParsed.problems.length ? "warn" : "ok",
+      detail: !neaLastParsed ? "no run recorded yet (it records in the live database, so this starts again after each weekly update)"
+        : `last ran ${ago(neaLastParsed.at, now)}: ${neaLastParsed.problems.length ? neaLastParsed.problems.join("; ") : "all feeds fine"}` },
+    { name: "NEA alert", level: neaAlerted ? "fail" : neaSince ? "warn" : "ok",
+      detail: neaAlerted ? `issue opened ${ago(Number(neaAlerted), now)}; problem since ${ago(Number(neaSince), now)}`
+        : neaSince ? `a problem started ${ago(Number(neaSince), now)}; an issue opens if it lasts an hour` : "no open problem" },
+    { name: "Freshness check (every 6 h)", level: !freshLast ? "warn" : now - Number(freshLast) > 7 * 3600_000 ? "fail" : "ok",
+      detail: freshLast ? `last ran ${ago(Number(freshLast), now)}${lastDispatch ? `; last asked for a rebuild ${ago(Number(lastDispatch), now)}` : ""}` : "no run recorded yet" },
+  ];
+
+  const sections = [
+    { title: "Data", checks: data },
+    { title: "NEA weather feeds", note: "Fetched live now. Rain, lightning and UV are often empty; for them the reply's format and time are checked.", checks: nea },
+    { title: "Other services", checks: services },
+    { title: "Keys and tokens", checks: keys },
+    { title: "Scheduled jobs", checks: jobs },
+  ];
+  const report: Report = { generated_at: new Date(now).toISOString(), overall: overall(sections), sections };
+  statusCache = { at: Date.now(), report };
+  return report;
+}
+
 // ---------------------------------------------------------------- entry
 export default {
   async fetch(request, baseEnv, ctx): Promise<Response> {
@@ -680,9 +876,10 @@ export default {
     }
     return noIndex(await handle(request, baseEnv, ctx, url));
   },
-  async scheduled(_event, baseEnv, ctx) {
+  async scheduled(event, baseEnv, ctx) {
     const env: Env = { ...baseEnv, DB: await activeDb(baseEnv) };
-    ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
+    if (event.cron === NEA_CRON) ctx.waitUntil(checkNea(env).catch((e) => console.error("NEA check failed:", String(e))));
+    else ctx.waitUntil(checkForNewData(env).catch((e) => console.error("freshness check failed:", String(e))));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -720,13 +917,28 @@ async function handle(request: Request, baseEnv: Env, ctx: ExecutionContext, url
         if (!local && (out.status === 200 || out.status === 204)) ctx.waitUntil(cache.put(key, out.clone()));
         return out;
       }
+      if (url.pathname === "/status" || url.pathname === "/status.json") {
+        // the owner's status page: never cached, never indexed, no secret values (see src/status.ts).
+        // It calls other services, so it shares the API's per-visitor rate limit.
+        if (env.API_LIMIT && !(await env.API_LIMIT.limit({ key: request.headers.get("cf-connecting-ip") ?? "unknown" })).success) {
+          return new Response("too many requests, slow down", { status: 429, headers: { "retry-after": "60" } });
+        }
+        const report = await statusReport(env);
+        const res = url.pathname === "/status.json"
+          ? new Response(JSON.stringify(report, null, 1), { headers: { "content-type": "application/json; charset=utf-8" } })
+          : new Response(renderStatus(report), { headers: { "content-type": "text/html; charset=utf-8" } });
+        for (const [k, v] of Object.entries(PAGE_HEADERS)) res.headers.set(k, v);
+        res.headers.set("cache-control", "no-store");
+        res.headers.set("x-robots-tag", "noindex, nofollow");
+        return res;
+      }
       if (url.pathname === "/sitemap.xml") {
         return withSecurityHeaders(await sitemap(env.DB, String((await getMeta(env))?.built_at ?? "") || null));
       }
       if (url.pathname === "/" && (request.method === "GET" || request.method === "HEAD")) {
         // the app shell, with a title/description matching the shared link (?p= / ?s= / ?t=)
         const shell = await env.ASSETS.fetch(new Request(new URL("/", url), request));
-        const res = withMeta(new Response(shell.body, shell), await pageMeta(env.DB, url));
+        const res = withMeta(new Response(shell.body, shell), await pageMeta(env.DB, url, Number((await getMeta(env))?.tree_count) || null));
         const out = new Response(res.body, res);
         for (const [k, v] of Object.entries(PAGE_HEADERS)) out.headers.set(k, v);
         out.headers.set("cache-control", "public, max-age=0, must-revalidate");

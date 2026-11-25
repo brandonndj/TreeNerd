@@ -1,0 +1,53 @@
+name: NEA feed alert
+
+# Run by the Worker's hourly check (src/worker.ts, checkNea) when NEA's weather feeds have had a problem
+# for over an hour, and again when they recover. Opens one issue, adds to it while the problem lasts,
+# and closes it on recovery. Runs only when the Worker asks, so it uses Actions minutes only during
+# an outage.
+on:
+  workflow_dispatch:
+    inputs:
+      status:
+        description: problem or recovered
+        required: true
+        type: choice
+        options: [problem, recovered]
+      details:
+        description: What the check found
+        required: false
+        default: ""
+
+concurrency:
+  group: nea-alert
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Open, update or close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS: ${{ inputs.status }}
+          DETAILS: ${{ inputs.details }}
+        run: |
+          set -euo pipefail
+          TITLE="Weather feeds from NEA are not working"
+          OPEN=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ "$STATUS" = "recovered" ]; then
+            [ -n "$OPEN" ] && gh issue close "$OPEN" --repo "$GITHUB_REPOSITORY" --comment "Recovered: $DETAILS"
+            exit 0
+          fi
+          BODY=$(printf '%s\n\n%s\n\n%s' \
+            "The hourly check found a problem with NEA's real-time feeds on data.gov.sg. While it lasts, the weather card leaves out the affected readings (nothing wrong is shown)." \
+            "Found: $DETAILS" \
+            "If NEA changed a feed's format, update src/weather.ts and the saved responses in tests/fixtures/nea. This issue closes itself when the feeds recover.")
+          if [ -n "$OPEN" ]; then
+            gh issue comment "$OPEN" --repo "$GITHUB_REPOSITORY" --body "Still failing. $DETAILS"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+          fi

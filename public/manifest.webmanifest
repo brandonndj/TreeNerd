@@ -3,7 +3,7 @@
   "lang": "en-SG",
   "name": "TreeNerd",
   "short_name": "TreeNerd",
-  "description": "Explore every tree in Singapore by road, park, area or species.",
+  "description": "Explore Singapore's trees, as recorded by NParks, by road, park, area or species.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -212,6 +212,202 @@ test("on data built before trails existed, nothing offers trails or per-resident
   await top.ctx.close();
 });
 
+test("explanations follow the build's own limits, and rankings say how many are listed", async () => {
+  const changed = (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json();
+    m.method = { ...m.method, road_max_m: 25, trail_max_m: 20, min_residents: 2000, residents_year: 2030, carbon_max_diameter_cm: 180 };
+    await r.fulfill({ response: res, json: m });
+  });
+  const { ctx, page, errors } = await open("/", undefined, B, changed);
+  await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  await page.click("#about");
+  const about = (await page.textContent("#panel-body")).replace(/\s+/g, " ");
+  for (const re of [/nearest named road within 25 m/, /within 20 m of the route/, /wider than 1\.8 m across/,
+    /uses the 2030 census, which counts residents only\. Areas with under 2,000 residents/, /Census of Population 2030/]) assert.match(about, re);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // an older build without meta.method: the pipeline's own limits (checked by tests/test_method.py)
+  const old = await open("/", undefined, B, (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json(); delete m.method; await r.fulfill({ response: res, json: m }); }));
+  await old.page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  await old.page.click("#about");
+  assert.match(await old.page.textContent("#panel-body"), /nearest named road within 30 m/);
+  await old.ctx.close();
+  const top = await open("/?top=road:trees");
+  await panelTitle(top.page, "Roads: most trees");
+  const listed = await top.page.locator(".ranked li").count();
+  assert.match(await top.page.textContent("#panel-body .sub"), new RegExp(`^Top ${listed} in Singapore`));
+  await top.ctx.close();
+});
+
+// Every live reading at once, the most the weather card ever shows (src/weather.ts gives each of these)
+const FULL_WEATHER = (at = new Date(Date.now() - 5 * 60_000).toISOString()) => ({
+  reading: { celsius: 31.46, station: "Somerset Road", dist_m: 1234, at },
+  heat: { level: "Moderate", wbgt: 31.2, station: "Hong Lim Park", dist_m: 2345, at },
+  forecast: { area: "Tanglin", text: "Thundery Showers", from: at, until: new Date(Date.now() + 90 * 60_000).toISOString() },
+  rain: { mm: 0.4, station: "Orchard Road Exchange Building", dist_m: 640, at },
+  lightning: { dist_m: 3456, at, kind: "Cloud to Ground", count: 4 },
+  uv: { index: 9, level: "Very high", at },
+  air: { pm25: 72, band: "Elevated", advice: "Healthy people: reduce strenuous outdoor activities for the next hour. Vulnerable people: avoid them.", region: "central", at },
+  source: "National Environment Agency, via data.gov.sg",
+});
+const fullWeather = (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: FULL_WEATHER() }));
+
+test("weather card: every reading names where it's from, lightning first, nothing sticks out", async () => {
+  for (const device of ["iPhone SE", "iPhone 15 Pro", "iPad Mini"]) {
+    const { ctx, page, errors } = await open("/?near=1.2994,103.8455,250", { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
+    await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+    const card = await page.evaluate(() => {
+      const el = document.querySelector("#weather"), r = el.getBoundingClientRect();
+      const t = (e) => (e?.textContent || "").replace(/\s+/g, " ").trim();
+      const rows = [...el.querySelectorAll(".wx-rows > li")].map((li) => { // "label value · where it's from"
+        const src = li.querySelector(".wx-src"), v = li.querySelector(".wx-v");
+        return src ? `${t(li.querySelector(".wx-k"))} ${t(v).slice(0, t(v).length - t(src).length).trim()} · ${t(src)}` : t(li);
+      });
+      const sticksOut = [...el.querySelectorAll("*")].filter((e) => { const b = e.getBoundingClientRect(); return b.width && (b.left < r.left - 0.5 || b.right > r.right + 0.5); }).length;
+      return { rows, sticksOut, fits: r.left >= 0 && r.right <= innerWidth, wide: el.scrollWidth > el.clientWidth + 1 };
+    });
+    assert.ok(card.fits && !card.wide && card.sticksOut === 0, `${device}: ${JSON.stringify(card)}`);
+    assert.match(card.rows[0], /Lightning 3\.5 km away .*cloud to ground, 4 strikes within 10 km/);
+    const all = card.rows.join(" | ");
+    for (const re of [/Raining now 0\.4 mm in 5 min · Orchard Road Exchange Building rain gauge, 600 m/, /Next 2 hours Thundery Showers · Tanglin area, until/,
+      /Heat stress Moderate \(WBGT 31\.2 °C\) · Hong Lim Park, 2\.3 km/, /UV index 9 very high · measured at Changi/,
+      /Air \(PM2\.5\) 72 µg\/m³ elevated · NEA central region/, /reduce strenuous outdoor activities for the next hour.*\(NEA\)/]) assert.match(all, re, device);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // without a temperature the other readings still show; the old reply (temperature only) still works
+  const t = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: { ...FULL_WEATHER(), reading: null } })));
+  await t.page.waitForSelector("#weather:not([hidden]) .wx-rows");
+  assert.equal(await t.page.$(".weather-temp"), null);
+  assert.equal(await t.page.getAttribute("#weather", "data-band"), "none");
+  await t.ctx.close();
+});
+
+test("tree types: the header keeps the colour key and any filter visible, and Show all undoes it", async () => {
+  const fmt = new Intl.NumberFormat("en-SG");
+  const meta = await (await fetch(`${B}/api/meta`)).json();
+  const present = Object.entries(meta.category_counts).filter(([, n]) => n > 0);
+  const { ctx, page, errors } = await open("/");
+  await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  const head = () => page.evaluate(() => ({ total: document.querySelector("#total").textContent,
+    dots: document.querySelectorAll("#legend-dots .dot").length, rings: document.querySelectorAll("#legend-dots .dot.ring").length,
+    dotsShown: getComputedStyle(document.querySelector("#legend-dots")).display !== "none",
+    showAll: !document.querySelector("#legend-all").hidden, filtered: document.querySelector("#legend").classList.contains("filtered") }));
+  assert.match(await page.textContent("#legend-toggle"), /^\s*Tree types/);
+  let h = await head();
+  assert.equal(h.total, `${fmt.format(meta.tree_count)} trees`);
+  assert.ok(h.dots === present.length && h.rings === 0 && !h.showAll && !h.filtered, JSON.stringify(h));
+  // switch off street trees: the header says how many types and trees are shown, from the build's counts
+  await page.uncheck('#legend-items input[data-c="1"]');
+  h = await head();
+  const shown = present.filter(([k]) => k !== "street").reduce((n, [, c]) => n + c, 0);
+  assert.equal(h.total, `${present.length - 1} of ${present.length} types · ${fmt.format(shown)} trees`);
+  assert.ok(h.rings === 1 && h.showAll && h.filtered, JSON.stringify(h));
+  assert.match(page.url(), /[?&]c=/);
+  // closed: the dots stay, so the key and the filter are still visible
+  await page.click("#legend-toggle");
+  h = await head();
+  assert.ok(h.dotsShown && h.rings === 1, JSON.stringify(h));
+  assert.match(h.total, /of \d+ types/);
+  await page.click("#legend-toggle");
+  await page.click("#legend-all");
+  h = await head();
+  assert.equal(h.total, `${fmt.format(meta.tree_count)} trees`);
+  assert.ok(h.rings === 0 && !h.showAll && !h.filtered, JSON.stringify(h));
+  assert.doesNotMatch(page.url(), /[?&]c=/);
+  assert.equal(await page.isChecked('#legend-items input[data-c="1"]'), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // a shared link with a filter opens with it shown
+  const shared = await open("/?c=2"); // park trees only
+  await shared.page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  assert.equal(await shared.page.textContent("#total"), `1 of ${present.length} types · ${fmt.format(meta.category_counts.park)} trees`);
+  await shared.ctx.close();
+});
+
+test("weather card: on trees, areas, subzones, parks and short roads; never on trails or long roads", async () => {
+  const pages = [["/?t=10687021", "this tree"], ["/?p=subzone/ntsz06", "the middle of the subzone"],
+    ["/?p=planning_area/newton", "the middle of the area"], ["/?p=road/orchard-road", "the middle of the road"]];
+  for (const [path, from] of pages) {
+    const { ctx, page, errors } = await open(path, undefined, B, fullWeather);
+    await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+    assert.match(await page.textContent("#weather .weather-note"), new RegExp(`distances are from ${from}\\.`), path);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  const trail = await open("/?p=trail/central-cycling-paths", undefined, B, fullWeather);
+  await panelTitle(trail.page, "Central cycling paths");
+  assert.equal(await trail.page.$("#weather"), null, "a route has no single place to measure from");
+  await trail.ctx.close();
+  // a road more than 3 km across: no card (its place reply is stretched to 5 km)
+  const long = await open("/?p=road/orchard-road", undefined, B, async (c) => {
+    await fullWeather(c);
+    await c.route("**/api/place/road/orchard-road*", async (r) => {
+      const res = await r.fetch(), d = await res.json();
+      d.bbox = [103.80, 1.300, 103.845, 1.300]; // about 5 km east to west
+      await r.fulfill({ response: res, json: d });
+    });
+  });
+  await panelTitle(long.page, "Orchard Road");
+  await long.page.waitForTimeout(500);
+  assert.equal(await long.page.$("#weather"), null);
+  await long.ctx.close();
+});
+
+test("weather card: a slow reply for a page that's been left isn't shown on the next one", async () => {
+  let first = true;
+  const { ctx, page, errors } = await open("/?p=subzone/ntsz06", undefined, B, (c) => c.route("**/api/weather*", async (r) => {
+    if (first) { first = false; await new Promise((ok) => setTimeout(ok, 2500)); return r.fulfill({ json: { ...FULL_WEATHER(), reading: { ...FULL_WEATHER().reading, station: "Old Place" } } }); }
+    return r.fulfill({ json: { ...FULL_WEATHER(), reading: { ...FULL_WEATHER().reading, station: "New Place" } } });
+  }));
+  await page.waitForSelector("#tree-list button");
+  await page.click("#tree-list button"); // open a tree while the subzone's reply is still coming
+  await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+  await page.waitForTimeout(3000);
+  assert.doesNotMatch(await page.textContent("#weather"), /Old Place/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test("temperature card: shown near the top with station and distance, hidden without a fresh reading", async () => {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString();
+  const reading = (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: {
+    reading: { celsius: 31.46, station: "Somerset Road", dist_m: 1234, at }, source: "National Environment Agency, via data.gov.sg" } }));
+  for (const opts of [{ ...devices["iPhone 15 Pro"], deviceScaleFactor: 1 }, { viewport: { width: 1280, height: 800 } }]) {
+    const { ctx, page, errors } = await open("/?near=1.2994,103.8455,250", opts, B, reading);
+    await page.waitForSelector("#weather:not([hidden])");
+    const card = await page.evaluate(() => {
+      const el = document.querySelector("#weather"), r = el.getBoundingClientRect();
+      const tiles = document.querySelector("#panel-body .stats").getBoundingClientRect();
+      return { text: el.innerText.replace(/\s+/g, " "), band: el.dataset.band, below: r.top >= tiles.bottom - 1,
+        fits: r.left >= 0 && r.right <= innerWidth, tempSize: parseFloat(getComputedStyle(el.querySelector(".weather-temp")).fontSize) };
+    });
+    assert.match(card.text, /31\.5 ?°C/);
+    assert.doesNotMatch(card.text, /Air temperature now/); // the time of the reading says when
+    assert.match(card.text, /Somerset Road station/);
+    assert.match(card.text, /1\.2 km away/);
+    assert.match(card.text, /aren't a measure of how much the trees cool/);
+    assert.equal(card.band, "hot");
+    assert.ok(card.below && card.fits && card.tempSize >= 28, JSON.stringify(card));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // blue is the coolest, red the hottest, on Singapore's scale
+  for (const [celsius, band] of [[25.9, "cool"], [26, "mild"], [29, "warm"], [31, "hot"], [33, "very-hot"]]) {
+    const t = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: {
+      reading: { celsius, station: "Somerset Road", dist_m: 500, at } } })));
+    await t.page.waitForSelector("#weather:not([hidden])");
+    assert.equal(await t.page.getAttribute("#weather", "data-band"), band, `${celsius} °C`);
+    await t.ctx.close();
+  }
+  const none = await open("/?near=1.2994,103.8455,250", undefined, B, (c) => c.route("**/api/weather*", (r) => r.fulfill({ json: { reading: null } })));
+  await none.page.waitForSelector("#panel-body h2");
+  await none.page.waitForTimeout(500);
+  assert.equal(await none.page.isHidden("#weather"), true, "no card, and no empty box, without a reading");
+  await none.ctx.close();
+});
+
 test("place pages: road story, residents, amenities and heritage", async () => {
   const { ctx, page, errors } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");
@@ -349,15 +545,19 @@ test("phone: bottom sheet, collapsed legend, theme toggle", async () => {
 const IOS = [["iPhone portrait", "iPhone 15 Pro"], ["iPhone landscape", "iPhone 15 Pro landscape"],
   ["iPad Mini portrait", "iPad Mini"], ["iPad Pro 11 portrait", "iPad Pro 11"], ["iPad Pro 11 landscape", "iPad Pro 11 landscape"]];
 const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes",
-  "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident"];
+  "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident",
+  "/?c=2,3"]; // a tree-type filter on: the "Show all" button and the filtered header
 
 for (const [label, device] of IOS) {
   test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {
     for (const path of IOS_VIEWS) {
       // layout is measured in points, so render at 1x: software rendering at an iPad's 2x is very slow
-      const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 });
-      if (path !== "/") await page.waitForSelector("#panel-body h2");
-      else { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
+      // the weather card at its fullest, so its rows are measured too
+      const { ctx, page, errors } = await open(path, { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
+      if (/[?&](p|t|top|near)=/.test(path)) await page.waitForSelector("#panel-body h2");
+      else if (path === "/") { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
+      else await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+      if (await page.$("#weather")) await page.waitForSelector("#weather:not([hidden]) .wx-rows");
       const report = await page.evaluate(() => {
         const shown = (e) => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
           return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && r.bottom > 0 && r.top < innerHeight; };

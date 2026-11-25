@@ -25,6 +25,8 @@ from, or labelled as an estimate, or absent. Never a guess presented as a fact.
 - **Label estimates and their inputs** (for example, the wood density used and where it came from).
 - **Filled-in data needs a measured accuracy bar**, checked on every build against values that are
   known. Below the bar, the field isn't filled.
+- **No figure is written by hand.** Counts and the method's limits come from the build that's live, so
+  they can't go out of date when the data changes. Figures quoted in docs are dated.
 - **Old data is labelled as old.** If an update is overdue, the site says so.
 
 **Enforced by**
@@ -55,6 +57,9 @@ README's Methodology, and decide what the page shows when the value is unknown.
 - **Taps answer at once.** If the answer takes time, a loading state appears; a slow answer never
   replaces something the person opened afterwards.
 - **Light and dark** both stay readable.
+- **Colour-blind safe.** Colour is never the only way to tell things apart (legends and labels name
+  them), and every set of colours that carries meaning stays distinguishable with protanopia,
+  deuteranopia and tritanopia. `tests/test_colours.py` checks this; use `tools/colours.py` to pick new colours.
 - **Works on restrictive networks:** ordinary requests only, with no reliance on partial-file requests.
 
 **Enforced by**

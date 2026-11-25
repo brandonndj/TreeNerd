@@ -1,12 +1,14 @@
 # 🌳 TreeNerd
 
-**[treenerd.fyi](https://treenerd.fyi)**: explore every tree in Singapore.
+**[treenerd.fyi](https://treenerd.fyi)**: explore the trees NParks records in Singapore.
 
-TreeNerd maps Singapore's ~890,000 trees and makes them searchable by **road**, **park**, **planning area**, **subzone**, **park connector**, **constituency**, **MRT station**, **address** or **species**. Pick a place to see how many trees it has, which species dominate, how much carbon they store, and its largest trees. Pick any tree to see its details.
+TreeNerd maps the trees NParks records in Singapore (889,678 at the 22 November 2026 update; forest trees, such as those in the nature reserves, aren't recorded one by one) and makes them searchable by **road**, **park**, **planning area**, **subzone**, **park connector**, **constituency**, **MRT station**, **address** or **species**. Pick a place to see how many trees it has, which species dominate, how much carbon they store, and its largest trees. Pick any tree to see its details.
 
 ![TreeNerd showing the trees of Orchard Road](docs/screenshot.jpg)
 
 ## Principles
+
+Why things are done the way they are, from the weather readings chosen to the map colours, is recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 Every build must meet three requirements, in this order: **accuracy**, a good **iPhone and iPad experience**, and **reliability**. They're defined, with the checks that enforce them, in [PRINCIPLES.md](PRINCIPLES.md).
 
@@ -20,7 +22,7 @@ Every build must meet three requirements, in this order: **accuracy**, a good **
 - **Trails**: NParks' park connector routes (Round Island Route, Coast-to-Coast Trail, Rail Corridor and others) and each town's cycling paths, with the route drawn on the map and trees per km.
 - **Amenities and heritage**: park toilets, fountains, playgrounds, shelters and more, hawker centres, and historic sites and national monuments, on park pages and around any spot.
 - **Trees per resident** for each area and subzone (2020 census), and **road descriptions** from the National Library Board.
-- **Live air temperature** at the nearest NEA weather station.
+- **Weather now** from NEA: air temperature and heat stress at the nearest station, the 2-hour forecast, rain and lightning nearby, the UV index and PM2.5.
 - **Rankings**: the roads, parks, trails and areas with the most trees, species, stored carbon, trees per km or trees per resident, and the widest trunks. Tap the empty search box to find them.
 - **Recent changes**: trees added to, or no longer in, NParks' records, for each place and for the whole island.
 - **Made for phones**: a resizable bottom sheet and large tap targets. It can be installed to the home screen.
@@ -64,7 +66,7 @@ Cloudflare Worker
 - **Tiles**: one [PMTiles](https://protomaps.com/docs/pmtiles) archive in storage. The Worker reads it and serves ordinary tile requests, so the map also works on networks that block partial-file requests.
 - **Worker**: TypeScript on Cloudflare Workers, with D1 (database), R2 (files) and edge caching keyed to each data build.
 - **Zero-downtime updates**: two databases take turns. Each update loads the idle one, checks it, then switches the site over, together with the tiles and search files that belong to it. The previous build stays as a rollback, which the `Roll back data` workflow restores.
-- **Monitoring**: `/api/health` reports whether everything is present and the data is fresh. A failed update opens an issue, and a missed weekly update triggers a rebuild.
+- **Monitoring**: `/api/health` reports whether everything is present and the data is fresh. `/status` (and `/status.json`) is the owner's page of every dependency: the data build, each NEA feed fetched live, NParks' tree layer, OneMap search and basemap, whether each key or token is set and accepted (never its value), and when the scheduled checks last ran. It isn't linked or indexed; put it behind Cloudflare Access to keep it private. A failed update opens an issue, and a missed weekly update triggers a rebuild.
 - **Pipeline**: Python with Shapely; tiles are built with Tippecanoe.
 
 | Path | Contents |
@@ -75,7 +77,7 @@ Cloudflare Worker
 | `src/search.ts` | Fuzzy search over places and species |
 | `src/geocode.ts` | Address-search helpers (query clean-up, result parsing) |
 | `src/pages.ts` | Page titles, link previews, sitemap |
-| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed), `audit.py` (accuracy audit run before publishing) |
+| `pipeline/` | `fetch.py` (sources), `build.py` (cleaning, joins, outputs), `enrich.py` (species gaps from Kew, with accuracy check), `wood.py` (wood density), `changes.py` (trees added and removed), `extras.py` (trails, amenities, heritage sites, residents, road descriptions), `audit.py` (accuracy audit run before publishing) |
 | `data/sources.json` | Upstream sources used by the pipeline |
 | `schema.sql` | Database schema |
 | `tools/announce.py` | Posts new changelog entries to the Telegram channel |
@@ -98,19 +100,21 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 | `/api/species/{id}` | One species, with where it's most common |
 | `/api/near?lat=&lng=&r=` | Trees within `r` metres (10–600) of a point in Singapore |
 | `/api/top?kind=&by=` | Rankings |
-| `/api/weather?lat=&lng=` | Latest air temperature at the nearest NEA station |
+| `/api/weather?lat=&lng=` | Live NEA readings near a point: `reading` (air temperature), `heat`, `forecast`, `rain`, `lightning`, `uv`, `air`; each null when there's no fresh one |
 | `/data/trails.geojson` | The trail routes, for drawing on a map |
 | `/api/changes` | Trees recently added or removed |
 | `/api/health` | 200 when everything is present and the data is fresh, otherwise 503 |
-| `/data/trees.csv.gz` | Every tree, as one CSV |
+| `/data/trees.csv.gz` | All the recorded trees, as one CSV |
 
 ## Methodology
 
-- **Roads are derived, not supplied.** The source data has no street field. Each tree is assigned to the nearest named road within 30 m, with main roads preferred over walkways and driveways. About 83% of trees are matched to a road; most of the rest are in parks.
+Percentages below are from the 22 November 2026 update and move a little each week. The site never shows them from this file: every figure visitors see is computed by the build, checked by `pipeline/audit.py`, and published with it (`/api/meta` has the current totals; the method's limits are in `meta.method`, which the About panel reads).
+
+- **Roads are derived, not supplied.** The source data has no street field. Each tree is assigned to the nearest named road within 30 m, with main roads preferred over walkways and driveways. About 83% of trees are matched to a road; just over half of the rest are in parks. A park tree within 30 m of a named road counts for both the road and the park (about 29% of park trees).
 - **Areas** (subzones, planning areas, parks, constituencies, conservation areas) are assigned by point-in-polygon.
 - **Carbon is an estimate.** It uses a standard pantropical allometric model (Chave et al., 2014) on girth, height band and wood density, with 47% of biomass counted as carbon. Treat it as indicative.
   - **Wood density** comes from the [Global Wood Density Database v.2](https://doi.org/10.5281/zenodo.16919509). A tree uses the value for its species (about 80% of trees; names are matched as NParks records them, then by Kew's accepted name), otherwise the average for its genus (15%), otherwise the average across the matched trees (5%).
-  - **No estimate is made where the model doesn't apply**: palms, pandans and bamboo (about 29,000 trees), and trunks recorded as wider than 2.12 m across (about 360 trees, mostly figs measured around their aerial roots). The model was fitted to trunks 5–212 cm in diameter; before this limit, single figs were credited with up to 490 tonnes. Place totals leave these trees out.
+  - **No estimate is made where the model doesn't apply**: palms, pandans and bamboo (about 29,000 trees), and trunks recorded as wider than 2.12 m across (about 370 trees, mostly figs measured around their aerial roots). The model was fitted to trunks 5–212 cm in diameter; before this limit, single figs were credited with up to 490 tonnes. Place totals leave these trees out.
   - The model was built for forest trees, so it's still rough for heavily pruned street trees.
 - **Every update is audited before it's published.** Every place and species figure is re-counted from the tree table, and 300 random trees are compared with NParks' live records. If anything disagrees, the update stops and the site keeps its previous data.
 - **Heights are banded** (3 m bands) as published by the source.
@@ -120,7 +124,7 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
   - **Origin** is only ever filled as *non-native*, and only when the plant's entire native range is outside Asia. Being native to the region doesn't make a plant native to Singapore, so "native" is never inferred; those species stay unknown.
   - **Accuracy is checked on every update** by hiding NParks' own answers and comparing. In testing, family matched 99.8% (the rest were renamed families, such as Cordiaceae → Boraginaceae) and origin matched 100%. If a check falls below its bar, that field isn't filled.
   - The app labels every value that came from Kew.
-- **Implausible measurements** are flagged, not hidden. A tree is flagged when its recorded girth and height can't both be right: a trunk wider than 0.3× the tree's height. About 20 trees in 875,000 are flagged. Figs (aerial roots), palms, pandans and bamboo are exempt, because they're measured around a whole clump. Flagged trees show a warning and no carbon estimate.
+- **Implausible measurements** are flagged, not hidden. A tree is flagged when its recorded girth and height can't both be right: a trunk wider than 0.3× the tree's height. About 20 trees in the whole inventory are flagged. Figs (aerial roots), palms, pandans and bamboo are exempt, because they're measured around a whole clump. Flagged trees show a warning and no carbon estimate.
 - **Recent changes** come from comparing each update with the one before it, by NParks' tree ID.
   - A tree that's no longer listed isn't always felled: it may have been re-recorded under a new ID.
   - If more than 5% of trees appear or disappear in one update, it's treated as a data problem and nothing is logged.
@@ -128,7 +132,16 @@ The app's own API is public and read-only: `GET` only, JSON, rate-limited per vi
 - **Stations**: an MRT or LRT station is the centre of its exits; its tree count is the trees within 250 m.
 - **Trails** count the trees within 15 m of the route. A tree can be on several. Nature reserve trails aren't listed: the inventory records managed trees, not the forest, so their counts would be misleadingly small.
 - **Trees per resident** uses the 2020 census, which counts residents only, so business and industrial areas score high. Areas with under 1,000 residents get no figure.
-- **Air temperature** is the latest reading (under 30 minutes old) at the nearest of NEA's weather stations, shown with the station's name and distance. It is not a measure of how much trees cool a place.
+- **Weather** is shown on tree pages, parks, planning areas, subzones and roads up to 3 km across (measured from the middle of the place's bounding box), and around any spot. Trails, park connectors, constituencies and longer roads get none, since one reading can't describe them. Distances under 1 km are shown to the nearest 100 m, because the point sent is rounded to about 100 m. It comes live from NEA's real-time feeds on data.gov.sg (`src/weather.ts`, tested in `tests/weather.test.mjs`). Each reading is shown with where it's from and when, and is dropped once it's older than its feed's normal interval allows:
+  - *Air temperature*: nearest station, under 30 minutes old.
+  - *Heat stress*: wet-bulb globe temperature at the nearest station, with NEA's own rating (Low, Moderate, High); under 45 minutes old.
+  - *2-hour forecast*: NEA's forecast for the forecast area whose centre is nearest, shown only while it's valid.
+  - *Rain*: the last 5 minutes at the nearest rain gauge, shown only when it recorded rain (no rain shown is not a claim that it's dry); under 20 minutes old.
+  - *Lightning*: the nearest strike NEA recorded within 10 km in the last 15 minutes, with its time and type, and how many there were. The 10 km is our choice, not an NEA threshold, so the distance itself is shown.
+  - *UV index*: NEA's single hourly reading for Singapore, measured at Changi, with the WHO exposure category (Low 0-2, Moderate 3-5, High 6-7, Very high 8-10, Extreme 11+); not shown when it's 0 or over 2.5 hours old.
+  - *PM2.5*: the 1-hour reading for the NEA region (north, south, east, west, central) whose centre is nearest, with NEA's band (Normal up to 55 µg/m³, Elevated 56-150, High 151-250, Very high above 250) and NEA's advice for that band; under 2 hours old. The region is named, since NEA doesn't publish the regions' boundaries in this feed.
+
+  None of these measures how much trees cool a place. Each feed is fetched at most once every two minutes and never stored, so they add no database cost. An hourly check (`checkNea` in `src/worker.ts`) confirms every feed still gives what the card needs; a problem lasting over an hour opens a GitHub issue through the *NEA feed alert* workflow, and recovery closes it. The Worker sends the optional `DATAGOVSG_API_KEY` secret with NEA requests if it's set.
 - **Amenities** are named by their type; NParks' own labels are shown as the description.
 - **Freshness**: the data is rebuilt once a week. The app shows the date of the last update, and says so if an update is overdue.
 

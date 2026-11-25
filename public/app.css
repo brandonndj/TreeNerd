@@ -3,8 +3,10 @@
   --bg: #f6f7f4; --surface: #ffffff; --surface-2: #f0f2ec; --text: #17201a; --muted: #5d6b61;
   --border: #dde2d8; --accent: #1f7a3f; --accent-ink: #ffffff; --shadow: 0 6px 24px rgba(20, 35, 25, .16);
   --radius: 14px; --tap: 44px;
-  --c-street: #2f9e44; --c-park: #0b7285; --c-botanic: #7048e8; --c-user: #e8590c;
-  --c-conservation: #1971c2; --c-heritage: #c2255c; --c-other: #868e96;
+  /* Data colours: chosen so every pair stays distinct with red-green (protanopia, deuteranopia) and
+     blue-yellow (tritanopia) colour blindness. Checked by tests/test_colours.py; change them only there first. */
+  --c-street: #097e07; --c-park: #2aa0f4; --c-botanic: #471471; --c-user: #f29e0d;
+  --c-conservation: #482af4; --c-heritage: #71142b; --c-other: #868e96; --c-ink: #0b3d91;
   --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
   color-scheme: light;
@@ -13,16 +15,16 @@
   :root:not([data-theme="light"]) {
     --bg: #0f1411; --surface: #18201b; --surface-2: #222c25; --text: #e7eee8; --muted: #9aa89e;
     --border: #2d3830; --accent: #51cf66; --accent-ink: #0b1a10; --shadow: 0 6px 24px rgba(0, 0, 0, .5);
-    --c-street: #69db7c; --c-park: #3bc9db; --c-botanic: #b197fc; --c-user: #ffa94d;
-    --c-conservation: #74c0fc; --c-heritage: #f783ac; --c-other: #adb5bd;
+    --c-street: #c8e6b3; --c-park: #57c7be; --c-botanic: #8f40dd; --c-user: #f5f247;
+    --c-conservation: #9c8eeb; --c-heritage: #dd4077; --c-other: #868e96; --c-ink: #f1f3f5;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1411; --surface: #18201b; --surface-2: #222c25; --text: #e7eee8; --muted: #9aa89e;
   --border: #2d3830; --accent: #51cf66; --accent-ink: #0b1a10; --shadow: 0 6px 24px rgba(0, 0, 0, .5);
-  --c-street: #69db7c; --c-park: #3bc9db; --c-botanic: #b197fc; --c-user: #ffa94d;
-  --c-conservation: #74c0fc; --c-heritage: #f783ac; --c-other: #adb5bd;
+  --c-street: #c8e6b3; --c-park: #57c7be; --c-botanic: #8f40dd; --c-user: #f5f247;
+  --c-conservation: #9c8eeb; --c-heritage: #dd4077; --c-other: #868e96; --c-ink: #f1f3f5;
   color-scheme: dark;
 }
 
@@ -114,8 +116,42 @@ button.bar:hover, button.bar.on { background: var(--surface-2); }
   font-variant-numeric: tabular-nums; text-align: right; }
 .list.ranked li button > span:first-of-type { flex: 1; min-width: 0; }
 #updated.stale { color: var(--c-user); }
+/* ---------- live air temperature card ---------- */
+.weather-card { --w: var(--c-street); display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 14px;
+  margin: 0 0 14px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--w) 35%, var(--border));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--w) 16%, var(--surface)), color-mix(in srgb, var(--w) 5%, var(--surface))); }
+/* blue (coolest) to dark red (hottest), stepping in lightness too, so the order survives colour
+   blindness; bands in app.js (tempBand), colours checked by tests/test_colours.py */
+.weather-card[data-band="cool"] { --w: #2166ac; }
+.weather-card[data-band="mild"] { --w: #6fb8e0; }
+.weather-card[data-band="warm"] { --w: #ffd23f; }
+.weather-card[data-band="hot"] { --w: #cc5500; }
+.weather-card[data-band="very-hot"] { --w: #6d0a10; }
+.weather-main { display: flex; align-items: center; gap: 8px; }
+.weather-icon { color: color-mix(in srgb, var(--w) 75%, var(--text)); flex: none; } /* stays visible on its own tint */
+.weather-reading { display: flex; flex-direction: column; line-height: 1.1; }
+.weather-temp { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.weather-unit { font-size: 16px; font-weight: 600; margin-left: 2px; color: var(--muted); }
+.weather-where { display: flex; flex-direction: column; text-align: right; font-size: 13px; line-height: 1.35; min-width: 0; }
+.weather-where span { overflow-wrap: anywhere; }
+.weather-card[data-band="none"] { --w: var(--c-other); }
+.wx-rows { grid-column: 1 / -1; list-style: none; margin: 6px 0 0; padding: 8px 0 0; border-top: 1px solid color-mix(in srgb, var(--w) 25%, var(--border));
+  display: flex; flex-direction: column; gap: 9px; font-size: 14px; line-height: 1.35; }
+.wx-row { display: grid; grid-template-columns: 7.6em 1fr; gap: 8px; }
+.wx-k { color: var(--muted); }
+.wx-v { min-width: 0; overflow-wrap: anywhere; }
+.wx-src { display: block; font-size: 12px; color: var(--muted); }
+.wx-alert { padding: 6px 8px; margin: 0 -8px; border-radius: 10px; background: var(--surface); border: 1.5px solid var(--text); }
+.wx-alert .wx-k { color: var(--text); font-weight: 700; }
+.wx-advice { display: grid; grid-template-columns: 7.6em 1fr; gap: 8px; margin-top: -4px; }
+.wx-advice > span:last-child { font-size: 12.5px; }
+@media (max-width: 360px) { .wx-row, .wx-advice { grid-template-columns: 1fr; gap: 0; } .wx-advice > span:first-child { display: none; } }
+.actions + .weather-card { margin-top: 18px; } /* not stuck to the buttons above it (tree pages) */
+.weather-note { grid-column: 1 / -1; margin: 6px 0 0; font-size: 11.5px; color: var(--muted); }
+@media (max-width: 360px) { .weather-card { grid-template-columns: 1fr; } .weather-where { text-align: left; } }
 .poi-counts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
 .poi-counts .chip { font-size: 12px; }
+.dot.ring { background: transparent !important; border: 2.5px solid currentColor; box-sizing: border-box; }
 .maplibregl-popup.poi-popup .maplibregl-popup-content { background: var(--surface); color: var(--text); border-radius: 12px;
   box-shadow: var(--shadow); padding: 10px 12px; font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .maplibregl-popup.poi-popup .maplibregl-popup-tip { border-top-color: var(--surface); border-bottom-color: var(--surface); }
@@ -145,15 +181,27 @@ details.changes summary { cursor: pointer; color: var(--accent); padding: 8px 0;
 .legend { position: fixed; z-index: 3; right: max(12px, var(--safe-r)); top: max(12px, var(--safe-t));
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 8px 12px; font-size: 13px; max-width: 230px; }
-.legend-title { font-weight: 600; display: flex; align-items: center; min-height: 32px; gap: 4px; border: 0;
-  background: none; padding: 0; width: 100%; text-align: left; }
+.legend-title { display: flex; flex-direction: column; align-items: stretch; justify-content: center; min-height: 32px; gap: 1px; border: 0;
+  background: none; padding: 0; width: 100%; text-align: left; color: var(--text); }
+.legend-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.legend-total { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.legend.filtered .legend-total { color: var(--text); font-weight: 600; } /* a filter is on: say so plainly */
+/* the colour key stays visible when the panel is closed; a switched-off type is a hollow ring */
+.legend-dots { display: none; gap: 4px; align-items: center; }
+.legend.collapsed .legend-dots { display: inline-flex; }
+.legend-dots .dot { width: 10px; height: 10px; margin: 0; }
+.legend-dots .dot.ring { border-width: 2px; }
+/* a quiet text button, like the footer links; on touch screens its tap area is still 44 points (below) */
+.legend-all { display: flex; align-items: center; width: fit-content; margin: 0 0 0 auto; padding: 4px 0; border: 0;
+  background: none; color: var(--accent); font-weight: 600; font-size: 13px; text-decoration: underline; text-underline-offset: 2px; }
+.legend-all[hidden] { display: none; }
 .legend label { display: flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
 .legend input { accent-color: var(--accent); margin: 0; width: 18px; height: 18px; }
 .legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .legend-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 6px;
   padding-top: 6px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
 .legend.collapsed #legend-items, .legend.collapsed .legend-foot { display: none; }
-.legend-title .chev { margin-left: auto; padding-left: 10px; color: var(--muted); transition: transform .15s ease; }
+.legend-title .chev { margin-left: auto; padding-left: 4px; color: var(--muted); transition: transform .15s ease; }
 .legend.collapsed .legend-title .chev { transform: rotate(-90deg); }
 .legend-foot button, .legend-foot a { border: 0; background: none; color: var(--accent); padding: 6px 0; font-size: 12px; text-decoration: underline; }
 .foot-links { display: inline-flex; gap: 12px; }
@@ -204,7 +252,7 @@ html.is-dev { --safe-t: calc(env(safe-area-inset-top, 0px) + 34px); }
 
 /* ---------- touch screens (iPhone, iPad): every control is at least 44 x 44 points ---------- */
 @media (pointer: coarse) {
-  .legend-title, .legend label { min-height: var(--tap); }
+  .legend-title, .legend label, .legend-all { min-height: var(--tap); }
   .legend-title { min-width: var(--tap); }
   .foot-links { gap: 4px; }
   .foot-links a, .foot-links button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--tap); min-width: var(--tap); padding: 0 6px; }

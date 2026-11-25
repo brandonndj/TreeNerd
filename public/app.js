@@ -185,6 +185,7 @@ map.on("load", async () => {
 
   const meta = await api("/api/meta").catch(() => null);
   state.meta = meta;
+  Object.assign(METHOD, meta?.method || {});
   const v = encodeURIComponent(meta?.built_at || "dev");
   // Tiles are served one by one by the Worker (no HTTP Range requests, which some corporate proxies break).
   map.addSource("trees", { type: "vector", url: `${location.origin}/tiles/trees.json?v=${v}`, promoteId: "id" });
@@ -207,14 +208,12 @@ map.on("load", async () => {
     paint: { "line-color": TRAIL_COLOR(), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 3, 13, 5, 17, 9] } }, "trees");
   // amenities, hawker centres and heritage sites for the open park, area or "near" circle
   map.addSource("pois", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  map.addLayer({ id: "pois", type: "circle", source: "pois", paint: {
-    "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 17, 8],
-    "circle-color": ["match", ["get", "kind"], "heritage", POI_COLOR.heritage, "hawker", POI_COLOR.hawker, POI_COLOR.amenity],
-    "circle-stroke-width": 2, "circle-stroke-color": dark() ? "#0f1411" : "#ffffff" } });
+  // amenities, hawker centres and heritage sites are rings (a hollow centre), so they never read as tree dots
+  map.addLayer({ id: "pois", type: "circle", source: "pois", paint: poiPaint() });
   map.addSource("sel", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "sel", type: "circle", source: "sel", paint: {
     "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 8, 18, 18], "circle-color": "transparent",
-    "circle-stroke-width": 3, "circle-stroke-color": css("--accent") } });
+    "circle-stroke-width": 3, "circle-stroke-color": css("--c-ink") } }); // neutral: visible around any tree colour
   map.addSource("near", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "near", type: "line", source: "near", paint: { "line-color": css("--accent"), "line-width": 2, "line-dasharray": [2, 2] } });
   buildLegend();
@@ -224,8 +223,20 @@ map.on("load", async () => {
 });
 
 // ---- overlays: a trail's line and points of interest
-const TRAIL_COLOR = () => (dark() ? "#ffd43b" : "#d9480f"); // not a colour the basemap or tree types use
-const POI_COLOR = { heritage: "#9c36b5", hawker: "#e8590c", amenity: "#1971c2" };
+function poiPaint() {
+  return {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, 4, 17, 8],
+    "circle-color": dark() ? "#0f1411" : "#ffffff",
+    "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 12, 2.5, 17, 4],
+    "circle-stroke-color": ["match", ["get", "kind"], "heritage", poiColor("heritage"), "hawker", poiColor("hawker"), poiColor("amenity")],
+  };
+}
+// Overlays are told apart from tree dots by form, not only colour: the trail is a bold neutral line,
+// points of interest are rings. Their colours are checked for colour blindness in tests/test_colours.py.
+const TRAIL_COLOR = () => css("--c-ink");
+const POI_COLORS = { light: { heritage: "#71142b", hawker: "#f29e0d", amenity: "#0b3d91" },
+  dark: { heritage: "#dd4077", hawker: "#f5f247", amenity: "#a5d8ff" } };
+const poiColor = (kind) => POI_COLORS[dark() ? "dark" : "light"][kind] || POI_COLORS.light.amenity;
 const POI_ICON = { heritage: "🏛", hawker: "🍜", amenity: "📍" };
 const EMPTY = { type: "FeatureCollection", features: [] };
 let trailShapes = null;
@@ -265,11 +276,11 @@ function refreshMapTheme() {
   if (map.getLayer("trees")) {
     map.setPaintProperty("trees", "circle-color", colorExpr());
     map.setPaintProperty("trees", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
-    map.setPaintProperty("sel", "circle-stroke-color", css("--accent"));
+    map.setPaintProperty("sel", "circle-stroke-color", css("--c-ink"));
     map.setPaintProperty("near", "line-color", css("--accent"));
     map.setPaintProperty("trail", "line-color", TRAIL_COLOR());
     map.setPaintProperty("trail-casing", "line-color", dark() ? "#0f1411" : "#ffffff");
-    map.setPaintProperty("pois", "circle-stroke-color", dark() ? "#0f1411" : "#ffffff");
+    for (const [k, v] of Object.entries(poiPaint())) map.setPaintProperty("pois", k, v);
     buildLegendItems();
   }
 }
@@ -369,29 +380,60 @@ function showTreesHere(trees) {
 }
 
 // ------------------------------------------------------------------ legend
+// The types in this build (those with trees), and which of them are switched on. Counts come from the build.
+const presentCats = () => CATS.filter((c) => (state.meta?.category_counts || {})[c.key] || !state.meta);
 function buildLegendItems() {
   const counts = state.meta?.category_counts || {};
-  $("#legend-items").innerHTML = CATS.filter((c) => counts[c.key] || !state.meta).map((c) => `
+  $("#legend-items").innerHTML = presentCats().map((c) => `
     <label><input type="checkbox" data-c="${c.code}" ${state.cats.has(c.code) ? "checked" : ""}>
       <span class="dot" style="background:${catColor(c.key)}"></span>${c.label}
-      <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("");
+      <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("") +
+    `<button class="legend-all" id="legend-all" hidden>Show all</button>`;
+  updateLegendHeader();
+}
+/**
+ * The header says what's on the map even when the panel is closed: a dot per type (a hollow ring when
+ * switched off), and the number of trees shown. A filter is never hidden: "4 of 6 types" appears with
+ * a "Show all" button whenever any type is off.
+ */
+function updateLegendHeader() {
+  const counts = state.meta?.category_counts || {}, present = presentCats();
+  const on = present.filter((c) => state.cats.has(c.code)), all = on.length === present.length;
+  $("#legend-dots").innerHTML = present.map((c) => `<span class="dot${state.cats.has(c.code) ? "" : " ring"}" style="${
+    state.cats.has(c.code) ? `background:${catColor(c.key)}` : `color:${catColor(c.key)}`}"></span>`).join("");
+  const shown = on.reduce((n, c) => n + (counts[c.key] || 0), 0);
+  const trees = all ? state.meta?.tree_count : shown;
+  $("#total").textContent = !state.meta ? "" : all ? `${fmt.format(trees || 0)} trees`
+    : `${on.length} of ${present.length} types · ${fmt.format(shown)} trees`;
+  $("#legend").classList.toggle("filtered", !all);
+  const btn = $("#legend-all");
+  if (btn) btn.hidden = all;
 }
 function buildLegend() {
-  $("#total").textContent = state.meta?.tree_count ? `· ${fmt.format(state.meta.tree_count)} trees` : "";
   // Updates run weekly. If the data is clearly older than that, say so rather than look current.
   const age = state.meta?.built_at ? (Date.now() - Date.parse(state.meta.built_at)) / 86400e3 : 0;
   state.stale = age > 10;
   $("#updated").textContent = state.meta?.built_at ? `Updated ${fmtDate(state.meta.built_at)}${state.stale ? " · update overdue" : ""}` : "";
   $("#updated").classList.toggle("stale", state.stale);
   buildLegendItems();
-  $("#legend-items").addEventListener("change", (e) => {
-    const c = Number(e.target.dataset.c);
-    e.target.checked ? state.cats.add(c) : state.cats.delete(c);
+  const applyCats = () => {
     map.setFilter("trees", filterExpr());
     const u = new URL(location.href); // keep the choice in the link, so a shared link shows the same trees
     if (state.cats.size === CATS.length) u.searchParams.delete("c");
     else u.searchParams.set("c", [...state.cats].sort().join(","));
     history.replaceState(null, "", u);
+    updateLegendHeader();
+  };
+  $("#legend-items").addEventListener("change", (e) => {
+    const c = Number(e.target.dataset.c);
+    e.target.checked ? state.cats.add(c) : state.cats.delete(c);
+    applyCats();
+  });
+  $("#legend-items").addEventListener("click", (e) => {
+    if (e.target.id !== "legend-all") return;
+    CATS.forEach((c) => state.cats.add(c.code));
+    $("#legend-items").querySelectorAll("input").forEach((i) => { i.checked = true; });
+    applyCats();
   });
   const lg = $("#legend"), tg = $("#legend-toggle");
   const setCollapsed = (v, remember) => {
@@ -498,7 +540,7 @@ function choose(r) {
   if (r.kind === "top") { q.blur(); return r.top === "changes" ? openChanges() : openTop(r.top, r.by); }
   q.value = r.name; $("#clear").hidden = false; q.blur();
   if (r.kind === "address") nearby(r.lat, r.lng, 150, { title: r.name, sub: r.address });
-  else if (r.kind === "mrt") nearby(r.lat, r.lng, 250, { title: r.name, sub: "Station" });
+  else if (r.kind === "mrt") nearby(r.lat, r.lng, METHOD.station_radius_m, { title: r.name, sub: "Station" });
   else if (r.kind === "species") openSpecies(r.slug);
   else openPlace(r.kind, r.slug, r.bbox);
 }
@@ -677,7 +719,7 @@ function renderPlace(d) {
     <h2>${esc(d.name)}</h2>
     <p class="sub">${esc(sub)}${d.alt?.length ? ` · ${esc(d.alt.join(" · "))}` : ""}</p>
     <div class="stats">
-      ${statTile(fmt.format(d.tree_count), d.kind === "trail" ? "trees within 15 m" : "trees")}
+      ${statTile(fmt.format(d.tree_count), d.kind === "trail" ? `trees within ${M("trail_max_m")} m` : "trees")}
       ${statTile(fmt.format(d.species_count), "species")}
       ${statTile(`${nativePct}%`, `of trees are native species${unknownPct ? ` · ${unknownPct}% unknown origin` : ""}`)}
       ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
@@ -685,7 +727,8 @@ function renderPlace(d) {
       ${extra.trees_per_1000_residents != null ? statTile(fmt.format(extra.trees_per_1000_residents), "trees per 1,000 residents") : ""}
     </div>
     ${residentsNote(extra)}
-    ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within 15 m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
+    ${placeWeatherPoint(d) ? WEATHER_SLOT : ""}
+    ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within ${M("trail_max_m")} m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
     ${extra.story ? `<h3>About this road</h3><p>${esc(extra.story)}</p><p class="note">From the ${esc(extra.story_source || "National Library Board")}.</p>` : ""}
 
     ${d.heritage_count ? `<div class="callout">🌟 ${d.heritage_count} heritage tree${d.heritage_count > 1 ? "s" : ""}</div>` : ""}
@@ -697,7 +740,6 @@ function renderPlace(d) {
     <h3>Largest trees</h3>
     <ul class="list" id="tree-list"></ul>
     ${poiSection(d.pois, d.kind === "park" ? "In this park" : "Places here")}
-    ${d.kind === "park" ? `<p id="weather" class="note"></p>` : ""}
     ${changesSection(d.changes)}
     <div class="actions">
       <button class="btn" id="more">Show more</button>
@@ -713,7 +755,8 @@ function renderPlace(d) {
   $("#share").addEventListener("click", share);
   wireChangeRows();
   wirePoiRows(d.pois);
-  if (d.kind === "park" && d.bbox) showWeather((d.bbox[1] + d.bbox[3]) / 2, (d.bbox[0] + d.bbox[2]) / 2);
+  const wp = placeWeatherPoint(d);
+  if (wp) showWeather(wp.lat, wp.lng, wp.from);
   loadTreeList(d, 0);
   $("#more").addEventListener("click", () => loadTreeList(d, $("#tree-list").children.length));
 }
@@ -843,8 +886,10 @@ async function openTree(id, fly = true, keepContext = false) {
       <a class="btn" href="https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${Number(t.lat)},${Number(t.lng)}" target="_blank" rel="noopener noreferrer">Street View ↗</a>
       <button class="btn" id="share">🔗 Share</button>
     </div>
+    ${WEATHER_SLOT}
     <p class="note">Carbon is an allometric estimate (Chave et al. 2014) from girth, height band and wood density${s.wood_density ? ` (${Number(s.wood_density).toFixed(2)} g/cm³, ${s.wood_density_src === "genus" ? "the average for its genus" : "for this species"})` : state.meta?.wood_density ? ` (${Number(state.meta.wood_density.default).toFixed(2)} g/cm³, the average across Singapore's trees)` : ""}.</p>`, { sheet: "half" });
   if (fly) map.easeTo({ center: [t.lng, t.lat], zoom: Math.max(map.getZoom(), 18), padding: panelPadding(), duration: 700 });
+  showWeather(Number(t.lat), Number(t.lng), "this tree");
   $("#back")?.addEventListener("click", () => state.place ? renderPlace(state.place) : openSpecies(state.species.id, false));
   $("#sp")?.addEventListener("click", () => openSpecies(s.id));
   $("#share").addEventListener("click", share);
@@ -896,7 +941,7 @@ async function nearby(lat, lng, r = 150, label = null) {
     <h2>${label ? esc(label.title) : `Trees within ${r} m`}</h2>
     ${label ? `<p class="sub">${label.sub ? `${esc(label.sub)} · ` : ""}trees within ${r} m</p>` : ""}
     <div class="stats">${statTile(fmt.format(d.count), "trees")}${statTile(d.trees.length ? `${Number(d.trees[0].dist_m)} m` : "—", "to the nearest tree")}</div>
-    <p id="weather" class="note"></p>
+    ${WEATHER_SLOT}
     <h3>Species here</h3>${barList(d.species.map((s) => ({ label: s.name, n: s.n })), d.count)}
     ${heritageTrees.length ? `<h3>Heritage trees here</h3><ul class="list">${heritageTrees.map((t) => `<li><button data-id="${Number(t.id)}"><span>🌟 ${esc(t.common || t.scientific || "Tree")}</span>
       <span class="meta">${Number(t.dist_m)} m</span></button></li>`).join("")}</ul>` : ""}
@@ -912,15 +957,15 @@ async function nearby(lat, lng, r = 150, label = null) {
   body.querySelectorAll("button[data-r]").forEach((b) => b.addEventListener("click", () => nearby(lat, lng, Number(b.dataset.r), label)));
   $("#share").addEventListener("click", share);
   wirePoiRows(d.pois);
-  showWeather(lat, lng);
+  showWeather(lat, lng, "this spot");
 }
 
 // ---- points of interest in panels
 function residentsNote(extra) {
   if (extra.trees_per_1000_residents != null) {
-    return `<p class="note">Per resident: ${fmt.format(extra.residents)} residents in the 2020 census. Workers, students and visitors aren't counted, so business and industrial areas score high.</p>`;
+    return `<p class="note">Per resident: ${fmt.format(extra.residents)} residents in the ${extra.residents_year || METHOD.residents_year} census. Workers, students and visitors aren't counted, so business and industrial areas score high.</p>`;
   }
-  if (extra.residents) return `<p class="note">Only ${fmt.format(extra.residents)} residents in the 2020 census, too few for a per-resident figure.</p>`;
+  if (extra.residents) return `<p class="note">Only ${fmt.format(extra.residents)} residents in the ${extra.residents_year || METHOD.residents_year} census, too few for a per-resident figure.</p>`;
   return "";
 }
 /** Counts by type, then heritage sites and hawker centres by name (amenities are on the map). */
@@ -933,7 +978,7 @@ function poiSection(rows, title, withDistance = false) {
     <span class="meta">${withDistance ? `${Number(p.dist_m)} m` : ""}</span></button></li>`;
   return `<h3>${esc(title)}</h3>
     ${counts.size ? `<div class="poi-counts">${[...counts].sort((a, b) => b[1] - a[1]).map(([c, n]) =>
-      `<span class="chip"><span class="dot" style="background:${POI_COLOR.amenity}"></span>${esc(c)} ${fmt.format(n)}</span>`).join("")}</div>` : ""}
+      `<span class="chip"><span class="dot ring" style="color:${poiColor("amenity")}"></span>${esc(c)} ${fmt.format(n)}</span>`).join("")}</div>` : ""}
     ${named.length ? `<ul class="list">${named.map((p) => row(p, rows.indexOf(p))).join("")}</ul>` : ""}
     <p class="note">Amenities: NParks. Hawker centres: NEA. Historic sites and national monuments: National Heritage Board. Tap a dot on the map for details.</p>`;
 }
@@ -947,17 +992,79 @@ function wirePoiRows(rows) {
   }));
 }
 
+// ---- which pages show live weather, and for which point (see docs/DECISIONS.md)
+// Places are measured from the middle of their bounding box. Long roads get no card: one reading can't
+// describe a road several km long. Trails, park connectors and constituencies never do, for the same reason.
+const WEATHER_MAX_EXTENT_KM = 3;
+const WEATHER_KINDS = { park: "the park", subzone: "the subzone", planning_area: "the area", road: "the road", heritage_road: "the road" };
+const bboxKm = (b) => haversineKm(b[1], b[0], b[3], b[2]);
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const r = Math.PI / 180, a = Math.sin((lat2 - lat1) * r / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lng2 - lng1) * r / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+/** The point a place's weather card is for, or null when it gets none. */
+function placeWeatherPoint(d) {
+  if (!WEATHER_KINDS[d.kind] || !Array.isArray(d.bbox) || d.bbox.length !== 4) return null;
+  if ((d.kind === "road" || d.kind === "heritage_road") && bboxKm(d.bbox) > WEATHER_MAX_EXTENT_KM) return null;
+  return { lat: (d.bbox[1] + d.bbox[3]) / 2, lng: (d.bbox[0] + d.bbox[2]) / 2, from: `the middle of ${WEATHER_KINDS[d.kind]}` };
+}
+
+// ---- the method's limits, as the live build used them (meta.method); defaults are for builds older than that
+const METHOD_DEFAULTS = { road_max_m: 30, trail_max_m: 15, station_radius_m: 250, carbon_max_diameter_cm: 212, min_residents: 1000, residents_year: 2020 };
+const METHOD = { ...METHOD_DEFAULTS };
+const M = (k) => fmt.format(METHOD[k]);
+
 // ---- live air temperature (NEA): the nearest station's reading, said plainly as such
-async function showWeather(lat, lng) {
-  const el = $("#weather");
-  if (!el) return;
+/**
+ * The card's colour, blue (cool) to red (very hot), on Singapore's own scale. From NEA's 2024
+ * readings (6.9 million, all stations): under 26 °C is the coolest 5% (rain, small hours), 26-29
+ * is a typical night or morning, 29-31 a typical day, 31-33 a hot afternoon, 33 and up the
+ * hottest 2%. Only the colour changes; the number is what's shown.
+ */
+const TEMP_BANDS = [[33, "very-hot"], [31, "hot"], [29, "warm"], [26, "mild"], [-Infinity, "cool"]];
+const tempBand = (c) => TEMP_BANDS.find(([min]) => c >= min)[1];
+const WEATHER_SLOT = `<div id="weather" class="weather-card" role="group" aria-label="Weather now" hidden></div>`;
+const hm = (at) => new Date(at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
+const hour = (at) => new Date(at).toLocaleTimeString("en-SG", { hour: "numeric" });
+// The point sent is rounded to 0.001° (about 100 m, for caching and privacy), so distances are shown no finer than that.
+const away = (m) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : m < 100 ? "under 100 m" : `${Math.round(m / 100) * 100} m`);
+const wxRow = (k, v, where, cls = "") => `<li class="wx-row ${cls}"><span class="wx-k">${k}</span><span class="wx-v">${v}<span class="wx-src">${where}</span></span></li>`;
+/** Fill the weather card with whatever NEA has fresh readings for (the Worker drops stale ones); hidden if none. */
+async function showWeather(lat, lng, from = "this spot") {
+  const slot = $("#weather");
+  if (!slot) return;
   let d;
   try { d = await api(`/api/weather?lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`); } catch { return; }
-  const w = d.reading;
-  if (!w || !$("#weather")) return;
-  const km = w.dist_m >= 1000 ? `${(w.dist_m / 1000).toFixed(1)} km` : `${w.dist_m} m`;
-  const time = new Date(w.at).toLocaleTimeString("en-SG", { hour: "numeric", minute: "2-digit" });
-  $("#weather").textContent = `🌡 Air temperature ${Number(w.celsius).toFixed(1)} °C at NEA's ${w.station} station, ${km} away (${time}).`;
+  const el = $("#weather");
+  if (!el || el !== slot || !d) return; // the panel changed while waiting: this reading is for another place
+  const w = d.reading, rows = [];
+  if (d.lightning) {
+    const l = d.lightning, more = l.count > 1 ? `, ${l.count} strikes within 10 km` : "";
+    rows.push(wxRow("⚡ Lightning", `<b>${away(l.dist_m)}${l.dist_m < 100 ? "" : " away"}</b>`, `${esc(hm(l.at))}${l.kind ? ` · ${esc(l.kind.toLowerCase())}` : ""}${more}`, "wx-alert"));
+  }
+  if (d.rain) rows.push(wxRow("Raining now", `<b>${Number(d.rain.mm)} mm</b> in 5 min`, `${esc(d.rain.station)} rain gauge, ${away(d.rain.dist_m)} · ${esc(hm(d.rain.at))}`));
+  if (d.forecast) rows.push(wxRow("Next 2 hours", `<b>${esc(d.forecast.text)}</b>`, `${esc(d.forecast.area)} area, until ${esc(hm(d.forecast.until))}`));
+  if (d.heat) rows.push(wxRow("Heat stress", `<b>${esc(d.heat.level)}</b> (WBGT ${Number(d.heat.wbgt).toFixed(1)} °C)`, `${esc(d.heat.station)}, ${away(d.heat.dist_m)} · ${esc(hm(d.heat.at))}`));
+  if (d.uv) rows.push(wxRow("UV index", `<b>${Number(d.uv.index)} ${esc(d.uv.level.toLowerCase())}</b>`, `measured at Changi · ${esc(hour(d.uv.at))}`));
+  if (d.air) {
+    const a = d.air;
+    rows.push(wxRow("Air (PM2.5)", `<b>${Number(a.pm25)} µg/m³ ${esc(a.band.toLowerCase())}</b>`, `NEA ${esc(a.region)} region · ${esc(hour(a.at))}`));
+    if (a.advice) rows.push(`<li class="wx-advice"><span></span><span>${esc(a.advice)} <span class="muted">(NEA)</span></span></li>`);
+  }
+  if (!w && !rows.length) return;
+  el.dataset.band = w ? tempBand(Number(w.celsius)) : "none";
+  el.innerHTML = (w ? `
+    <div class="weather-main">
+      <svg class="weather-icon" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7" stroke-width="2.6"/></svg>
+      <div class="weather-reading"><span class="weather-temp">${Number(w.celsius).toFixed(1)}<span class="weather-unit">°C</span></span></div>
+    </div>
+    <div class="weather-where">
+      <span>${esc(w.station)} station</span>
+      <span class="muted">${away(w.dist_m)}${w.dist_m < 100 ? "" : " away"} · ${esc(hm(w.at))}</span>
+    </div>` : "") + (rows.length ? `<ul class="wx-rows">${rows.join("")}</ul>` : "") + `
+    <p class="weather-note">Latest readings from NEA, each from the station, area or region named; distances are from ${esc(from)}. They aren't a measure of how much the trees cool it.</p>`;
+  el.hidden = false;
 }
 
 // ---- changes: trees added to / no longer in NParks' records
@@ -1031,6 +1138,7 @@ async function openTop(kind = "road", by = "trees") {
   try { d = await api(`/api/top?kind=${kind}${kind === "tree" ? "" : `&by=${by}`}`); }
   catch (e) { return seq === navSeq && openPanel(`<h2>Rankings</h2><p class="muted">${esc(e.message)}</p>`); }
   if (seq !== navSeq) return;
+  const n = (kind === "tree" ? d.trees : d.places).length; // how many are listed, not how many were asked for
   state.place = state.species = null;
   setHighlight(null); selectPoint(null); clearOverlays();
   setUrl({ top: kind === "tree" ? "tree" : `${kind}:${by}` });
@@ -1043,9 +1151,9 @@ async function openTop(kind = "road", by = "trees") {
   openPanel(`
     <h2>${kind === "tree" ? "Widest tree trunks" : `${esc(TOP_KINDS.find(([k]) => k === kind)[1])}: ${esc(TOP_BYS.find(([b]) => b === by)[1].toLowerCase())}`}</h2>
     <p class="sub">${kind === "tree" ? "By recorded girth. Figs and clumping palms are measured around the whole clump."
-      : by === "carbon" ? "Top 25 in Singapore, by estimated carbon"
-      : by === "per_resident" ? "Top 25, trees per 1,000 residents (2020 census). Areas with under 1,000 residents are left out."
-      : by === "per_km" ? "Top 25, trees within 15 m per km of route" : "Top 25 in Singapore"}</p>
+      : by === "carbon" ? `Top ${n} in Singapore, by estimated carbon`
+      : by === "per_resident" ? `Top ${n}, trees per 1,000 residents (${METHOD.residents_year} census). Areas with under ${M("min_residents")} residents are left out.`
+      : by === "per_km" ? `Top ${n}, trees within ${M("trail_max_m")} m per km of route` : `Top ${n} in Singapore`}</p>
     ${chips(topKinds(), kind, "kind")}
     ${kind === "tree" ? "" : chips(bysFor(kind), by, "by")}
     ${(kind === "tree" ? d.trees : d.places).length ? "" : `<p class="muted">Nothing to rank yet.</p>`}
@@ -1071,7 +1179,7 @@ $("#about").addEventListener("click", () => {
   openPanel(`
     <h2>About TreeNerd</h2>
     <div class="prose">
-      <p>Explore Singapore's ${m.tree_count ? fmt.format(m.tree_count) : "~890,000"} trees by road, park, area, address or species.</p>
+      <p>Explore ${m.tree_count ? `the ${fmt.format(m.tree_count)} trees NParks records in Singapore` : "the trees NParks records in Singapore"} by road, park, area, address or species. Forest trees, such as those in the nature reserves, aren't recorded one by one, so they aren't included.</p>
       <h3>Data</h3>
       <ul>
         <li>Trees: <a href="https://treessg.nparks.gov.sg" target="_blank" rel="noopener noreferrer">Trees.sg</a> © National Parks Board${m.source_last_edit ? `, last changed ${esc(fmtDate(m.source_last_edit))}` : ""}</li>
@@ -1080,19 +1188,19 @@ $("#about").addEventListener("click", () => {
         <li>Basemap and address search: <a href="https://www.onemap.gov.sg" target="_blank" rel="noopener noreferrer">OneMap</a> © Singapore Land Authority</li>
         <li>Missing species families and origins: <a href="https://powo.science.kew.org/about-wcvp" target="_blank" rel="noopener noreferrer">World Checklist of Vascular Plants</a>, Royal Botanic Gardens, Kew (CC BY 4.0)</li>
         <li>Trails: NParks park connector routes; cycling paths: Land Transport Authority, via data.gov.sg</li>
-        <li>Park amenities: NParks. Hawker centres and live air temperature: National Environment Agency. Historic sites and national monuments: National Heritage Board. Road descriptions: National Library Board. Residents: Census of Population 2020, Department of Statistics. All via data.gov.sg (Singapore Open Data Licence).</li>
+        <li>Park amenities: NParks. Hawker centres and live air temperature: National Environment Agency. Historic sites and national monuments: National Heritage Board. Road descriptions: National Library Board. Residents: Census of Population ${METHOD.residents_year}, Department of Statistics. All via data.gov.sg (Singapore Open Data Licence).</li>
         <li>Wood density: <a href="https://doi.org/10.5281/zenodo.16919509" target="_blank" rel="noopener noreferrer">Global Wood Density Database v.2</a>, Fischer et al. 2026 (CC BY 4.0)</li>
         <li>MRT and LRT stations: Land Transport Authority, via data.gov.sg</li>
       </ul>
       ${m.built_at ? `<p class="muted">TreeNerd data updated ${esc(fmtDate(m.built_at))}. ${state.stale ? "An update is overdue, so recent changes by NParks aren't shown yet." : "It refreshes every week."}</p>` : ""}
       <h3>How it's worked out</h3>
       <ul>
-        <li><b>Roads</b> are matched to the nearest named road within 30 m. Trees in parks are listed under the park.</li>
-        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than 2.1 m across, which the model doesn't cover.</li>
+        <li><b>Roads</b> are matched to the nearest named road within ${M("road_max_m")} m. A park tree that close to a road counts for both, so it appears on the road's page and the park's.</li>
+        <li><b>Carbon</b> is an estimate from girth, height and the species' wood density (Chave et al. 2014), not a measurement. It isn't estimated for palms, or for trunks recorded as wider than ${(METHOD.carbon_max_diameter_cm / 100).toFixed(1)} m across, which the model doesn't cover.</li>
         <li><b>Changes</b> come from comparing NParks' records at each update. A tree that's no longer listed isn't always felled.</li>
-        <li><b>Trails</b> count the trees NParks records within 15 m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
-        <li><b>Trees per resident</b> uses the 2020 census, which counts residents only. Areas with under 1,000 residents get no figure.</li>
-        <li><b>Air temperature</b> is the latest reading at the nearest of NEA's 17 weather stations, with its name and distance. It isn't a measure of how much trees cool a place.</li>
+        <li><b>Trails</b> count the trees NParks records within ${M("trail_max_m")} m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
+        <li><b>Trees per resident</b> uses the ${METHOD.residents_year} census, which counts residents only. Areas with under ${M("min_residents")} residents get no figure.</li>
+        <li><b>Weather</b> appears on trees, parks, areas, subzones, roads up to ${WEATHER_MAX_EXTENT_KM} km across, and around any spot. It comes live from NEA, and each reading names where it's from. For a place, distances are measured from the middle of the box that contains it, which for an irregular shape can lie just outside it. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>
         <li><b>Origin</b> comes from NParks. Where NParks has none, a species is marked non-native only if Kew records its whole native range outside Asia; otherwise it stays unknown rather than guessed.</li>
       </ul>
