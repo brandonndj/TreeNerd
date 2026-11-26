@@ -107,7 +107,54 @@ class AreaShapeTests(unittest.TestCase):
         f = area_shapes([(square, "an-area", "An Area")])["features"][0]
         self.assertEqual(f["properties"], {"s": "an-area", "n": "An Area"})
         out = f["geometry"]["coordinates"][0]
-        self.assertEqual(len(out), len(ring), "every point of the boundary is kept")
+        self.assertEqual(len(out), len(ring), "every point of the boundary is kept (none here are within 10 cm of another)")
         # the same points (the ring may start at another corner), each within ~10 cm of NParks'
         for x0, y0, _ in ring:
             self.assertTrue(any(abs(x - x0) <= 1e-6 and abs(y - y0) <= 1e-6 for x, y in out), (x0, y0))
+
+
+class SpeciesChecklistFallbackTests(unittest.TestCase):
+    """If Kew can't be reached, the update uses the last copy instead of stopping."""
+
+    def run_fetch(self, existing_size, fails):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from pipeline import enrich, fetch
+        with tempfile.TemporaryDirectory() as d:
+            zp = Path(d) / "wcvp.zip"
+            if existing_size:
+                zp.write_bytes(b"x" * existing_size)
+            boom = mock.Mock(side_effect=OSError("kew is down")) if fails else mock.Mock(return_value=b"new")
+            with mock.patch.object(enrich, "WCVP_ZIP", zp), mock.patch.object(fetch, "http", boom), mock.patch.object(fetch, "log"):
+                fetch.fetch_species_reference()
+            return zp.read_bytes()[:3] if zp.exists() else None
+
+    def test_fresh_download_replaces_the_copy(self):
+        self.assertEqual(self.run_fetch(20_000_000, fails=False), b"new")
+
+    def test_kept_copy_is_used_when_kew_is_down(self):
+        self.assertEqual(self.run_fetch(20_000_000, fails=True), b"xxx")
+
+    def test_no_usable_copy_still_fails_loudly(self):
+        with self.assertRaises(OSError):
+            self.run_fetch(0, fails=True)
+        with self.assertRaises(OSError):
+            self.run_fetch(500, fails=True)  # a stub, not a real checklist
+
+
+class ParkNameTests(unittest.TestCase):
+    def test_sections_of_one_park_become_one(self):
+        from pipeline.build import park_display_names
+        names = ["Singapore Botanic Gardens LC Zone 1 (TNC)", "Singapore Botanic Gardens LC Arbo/Prc/Pru",
+                 "Bishan-Ang Mo Kio Park (Pond Gardens)", "Bishan-Ang Mo Kio Park (River Plains)",
+                 "Jubilee Park (FCP)", "Hoover Park (Lor Pisang Hijau Playground)", "Pasir Ris Park"]
+        self.assertEqual(park_display_names(names), [
+            "Singapore Botanic Gardens", "Singapore Botanic Gardens", "Bishan-Ang Mo Kio Park", "Bishan-Ang Mo Kio Park",
+            "Jubilee Park (FCP)", "Hoover Park (Lor Pisang Hijau Playground)", "Pasir Ris Park"])
+
+    def test_a_lone_zone_keeps_its_name(self):
+        from pipeline.build import park_display_names
+        self.assertEqual(park_display_names(["Somewhere LC Zone 1 (X)"]), ["Somewhere LC Zone 1 (X)"])
+        # East Coast Park's areas are named areas, not sections: they stay separate
+        self.assertEqual(park_display_names(["East Coast Park Area A", "East Coast Park Area B"]), ["East Coast Park Area A", "East Coast Park Area B"])

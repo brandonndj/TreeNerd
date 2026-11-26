@@ -11,7 +11,7 @@ const npx = (args, opts = {}) => spawnSync("npx", args, { stdio: ["ignore", "ign
 rmSync(STATE, { recursive: true, force: true });
 const steps = [
   ["wrangler", "d1", "execute", "trees", "--env", "e2e", "--local", "--yes", "--persist-to", STATE, "--file", `${FIX}/seed.sql`],
-  ...["search.json", "species.json", "trees.pmtiles", "trails.geojson", "tca.geojson"].map((f) =>
+  ...["search.json", "species.json", "trees.pmtiles", "trails.geojson", "tca.geojson", "reserves.geojson"].map((f) =>
     ["wrangler", "r2", "object", "put", `trees-data/${f}`, "--env", "e2e", "--file", `${FIX}/${f}`, "--local", "--persist-to", STATE]),
 ];
 // the fixture's build date is fixed; make it yesterday so the site counts as up to date

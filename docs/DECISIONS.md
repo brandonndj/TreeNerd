@@ -42,6 +42,23 @@ the classes it leaves out, so a new kind NParks adds is noticed and can be added
 **A big jump in changes is treated as a data problem.** More than 5% of trees appearing or disappearing
 in one update isn't logged as news. *Why:* that is almost always NParks re-issuing records.
 
+**Sections of one park are one park.** NParks lists some parks in sections ("SBG LC Zone 1 (TNC)", "...
+(Pond Gardens)"). When two or more entries share a name once the section label goes, they're one place;
+a single "Jubilee Park (FCP)" keeps its name, and East Coast Park's Areas A-H, which are named on site,
+stay separate. Old section addresses still open the park.
+
+**Park paths say only what NParks' data supports.** Length open to walking, cycling allowed, boardwalks,
+and "some paths have stairs" when there are any (never "no stairs": the data may be incomplete). No
+wheelchair claims: NParks doesn't define its "wheeling" flag.
+
+**Nature reserves: boundaries and NParks' own words.** The gazette's land lots are merged per reserve.
+The page quotes NParks ("conserved under the Parks and Trees Act") and states no rules or fines, which
+couldn't be confirmed from the Act. Their outline is solid where the conservation areas' is dashed, so
+the two differ without relying on colour.
+
+**On iPhone a card opens at 70% of the screen** (owner's choice): most of it shows, a strip of map stays
+for the place, and the X returns to the map. The weather card folds to one line there; warnings never fold.
+
 **Tree Conservation Areas: pages and outlines, no tree list.** The two areas hold about 129,000 recorded
 trees. Listing or highlighting them would need an index on the trees table, rebuilt every update (about
 0.6 million billed rows a month); the build works out their figures instead and the map draws the
@@ -51,7 +68,7 @@ records don't say at what height each girth was measured. No fine amount: it cou
 the Act (the statute site refuses automated reads). The page says plainly that most private trees aren't
 on the map, though the rule covers them, so a homeowner doesn't read "no dots" as "no rule".
 
-**Area outlines are NParks' boundaries as published.** Every point is kept (coordinates to about 10 cm).
+**Area outlines are NParks' boundaries as published.** Coordinates are kept to about 10 cm, so only points closer together than that merge (Central: 2,604 of NParks' 2,621).
 A simplified outline was within 3.6 m of NParks' line, but these are legal boundaries and the full
 outlines are only about 80 KB, so there is no reason to redraw them. Which trees are inside is always
 decided against NParks' original boundary.
@@ -145,6 +162,31 @@ API answers are keyed to the build. Live weather is cached for a minute and neve
 
 **Tests run on their own Worker environment**, with a rate limit a fast test run can't hit, and on
 WebKit (macOS) as well as Chromium, because most visitors use Safari on iOS.
+
+**A missed weekly update is requested again, even if NParks hasn't edited.** The Worker's 6-hourly
+check asks GitHub to run the update once the data is over 8 days old, at most once every 20 hours.
+It used to require an NParks edit too, so a skipped run in a quiet week left the site marked "update
+overdue" with nothing to fix it, while other sources (data.gov.sg, roads) may have changed. The cost is
+the update that was missed, not an extra one; a run that keeps failing still opens an issue each time.
+
+**A layer that vanishes stops the update.** Optional sources (amenities, trails, heritage sites,
+stations, census) are skipped when their download fails, so the audit compares each kind of place, each
+amenity class (10 or more) and the trees on trails with the previous update: a drop of over 20% stops
+it, and the site keeps the previous data. A real drop that large is rare enough to want a person to look.
+
+**Kew's checklist has a fallback.** The data workflow keeps the last copy (GitHub cache); if Kew can't be
+reached, that copy is used rather than stopping the update. It changes a few times a year.
+
+**/status shows whether GitHub still runs the weekly update.** GitHub switches off scheduled workflows
+after 60 days without activity in a public repository, which would stop updates silently.
+
+**Subzones are from the 2019 Master Plan, planning areas from 2025.** No 2025 subzones are published
+yet, and the 2020 census counts residents by 2019 subzone. 185 trees (0.02%, 22 Nov 2026) sit in a 2019
+subzone that straddles a 2025 planning-area boundary.
+
+**A bad NEA reply is never cached as healthy.** A reply is checked to be valid data before it's cached
+for 2 minutes; one that isn't is treated like an error (cached for 20 seconds, so callers back off
+instead of all asking again at once).
 
 **One page shows whether every dependency works.** `/status` checks the other services live on load (reused
 for 30 seconds, rate-limited like the API), but reads NEA through the weather card's shared cache and reads when the scheduled jobs last ran. It shows whether each

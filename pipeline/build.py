@@ -134,6 +134,19 @@ KEEP_UPPER = {"PG", "PCN", "GRC", "SMC", "LC", "TNC", "CC", "BTC", "HDB", "MRT",
               "NE", "NW", "SE", "SW", "NSRCC", "SAFRA", "NUS", "NTU", "SMU", "SIT", "SUTD", "ECP"}
 
 
+# --------------------------------------------------------------- parks
+SECTION_RE = re.compile(r"\s+LC\b.*$|\s*\([^)]*\)$")  # "... LC Zone 1 (TNC)", "... LC Arbo/Prc/Pru", "... (Pond Gardens)"
+
+
+def park_display_names(names: list[str]) -> list[str]:
+    """One name per park, so NParks' sections of a park ("Singapore Botanic Gardens LC Zone 1 (TNC)",
+    "Bishan-Ang Mo Kio Park (Pond Gardens)") become one place. A section label is dropped only when two or
+    more entries share what's left; a single "Jubilee Park (FCP)" keeps its name."""
+    bases = [SECTION_RE.sub("", n).strip() or n for n in names]
+    shared = Counter(bases)
+    return [b if shared[b] > 1 else n for n, b in zip(names, bases)]
+
+
 # --------------------------------------------------------------- carbon
 def heritage_location(desc):
     """'Common Name : Rain Tree. Found in Fort Canning Park' -> 'Found in Fort Canning Park'.
@@ -512,10 +525,27 @@ def main():
     j = polygon_join(pts, pa_feats, "planning areas")
     tree_pa = np.where(j >= 0, pa_ids[np.maximum(j, 0)], -1)
 
-    park_feats, park_ids = poly_places("dgs_parks_nature_reserves.geojson", "park",
-                                       lambda p: title(p["NAME"]),
-                                       lambda p: {"nature_reserve": p.get("N_RESERVE") not in (None, "0", 0)},
-                                       required=True, slug_fn=lambda p: slugify(f"{p['NAME']}-{p.get('L_CODE', '')}"))
+    # Parks: NParks lists some parks in sections ("SBG LC Zone 1 (TNC)", "... (Pond Gardens)"). Sections of
+    # one park become one place (see park_names); the section pages' old addresses are kept as aliases.
+    park_feats = load_fc("dgs_parks_nature_reserves.geojson", True)
+    park_names = park_display_names([title(f["properties"]["NAME"]) for f in park_feats])
+    park_pid, ids = {}, []
+    for f, name in zip(park_feats, park_names):
+        pr = f["properties"]
+        own_slug = slugify(f"{pr['NAME']}-{pr.get('L_CODE', '')}")
+        grouped = name != title(pr["NAME"])
+        key = slugify(name) if grouped else own_slug
+        reserve = pr.get("N_RESERVE") not in (None, "0", 0)
+        if key not in park_pid:
+            park_pid[key] = add_place("park", name, extra={"nature_reserve": reserve}, slug=key)
+        place = places[park_pid[key] - 1]
+        place["extra"]["nature_reserve"] = place["extra"]["nature_reserve"] or reserve
+        if grouped:
+            place["extra"].setdefault("former_slugs", []).append(own_slug)
+        ids.append(park_pid[key])
+    park_ids = np.array(ids, dtype=np.int64)
+    from . import extras as _extras
+    park_path_stats = _extras.park_paths(park_feats, park_ids)
     j = polygon_join(pts, park_feats, "parks")
     tree_park = np.where(j >= 0, park_ids[np.maximum(j, 0)], -1)
 
@@ -682,6 +712,10 @@ def main():
         kept_routes.append(r)
         kept_slugs.append(p["slug"])
     trail_geo = extras.trail_shapes(kept_routes, kept_slugs)
+    # paths NParks maps in each park (shown only where there are some)
+    for pid, st in park_path_stats.items():
+        if pid in kept and st["walk_m"] >= 100:
+            kept[pid]["extra"]["paths"] = extras.path_figures(st)
     for pid in tca_cats:
         if pid in kept:
             kept[pid]["extra"]["categories"] = dict(tca_cats[pid].most_common())
@@ -690,6 +724,7 @@ def main():
     for f, pid in zip(tca_feats, tca_ids):
         if int(pid) in kept:
             kept[int(pid)]["bbox"] = [round(v, 6) for v in shapely.bounds(shapely.force_2d(shape(f["geometry"]))).tolist()]
+    reserve_geo = extras.area_shapes(extras.nature_reserves())
     tca_geo = extras.area_shapes([(f, kept[int(pid)]["slug"], kept[int(pid)]["name"])
                                   for f, pid in zip(tca_feats, tca_ids) if int(pid) in kept])
 
@@ -737,7 +772,7 @@ def main():
 
     # ---- outputs ---------------------------------------------------------------
     write_outputs(trees, species, places_with_trees, road_source, source_edit, t0, enrichment_report,
-                  stations=stations, density_report=density_report, trail_rows=trail_rows, trail_geo=trail_geo,
+                  stations=stations, density_report=density_report, trail_rows=trail_rows, trail_geo=trail_geo, tca_geo=tca_geo, reserve_geo=reserve_geo,
                   pois=poi_list)
 
 
@@ -753,7 +788,8 @@ def cell_of(lat, lng):
 
 
 def write_outputs(trees, species, places, road_source, source_edit, t0, enrichment=None, stations=(),
-                  density_report=None, trail_rows=(), trail_geo=None, pois=()):
+                  density_report=None, trail_rows=(), trail_geo=None, pois=(), tca_geo=None, reserve_geo=None):
+    from . import extras  # the method's limits live there (imported here too: main()'s import is local to it)
     log("write: trees.geojsonl (tiles)")
     with open(OUT / "trees.geojsonl", "w") as fh:
         for t in trees:
@@ -832,6 +868,10 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
         "stations": len(stations),
         "trail_trees": len(set(trail_rows)),
         "poi_counts": dict(Counter(p["class"] for p in pois)),
+        "nature_reserves": len((reserve_geo or {}).get("features", [])),
+        # park paths (NParks Tracks): how many parks have figures, and their total, for the audit
+        "park_paths": {"parks": sum(1 for p in places if p["extra"].get("paths")),
+                       "km": round(sum(p["extra"]["paths"]["paths_km"] for p in places if p["extra"].get("paths")), 1)},
         # the limits the method uses, so the app's explanations always match this build
         "method": {"road_max_m": ROAD_MAX, "trail_max_m": extras.TRAIL_MAX, "station_radius_m": JOINS.get("stationRadiusM", 250),
                    "carbon_max_diameter_cm": round(CARBON_MAX_GIRTH_M / math.pi * 100),
@@ -860,7 +900,8 @@ def write_outputs(trees, species, places, road_source, source_edit, t0, enrichme
                for st in stations]
     write_json(OUT / "search.json", search)
     write_json(OUT / "trails.geojson", trail_geo or {"type": "FeatureCollection", "features": []})
-    write_json(OUT / "tca.geojson", tca_geo)
+    write_json(OUT / "tca.geojson", tca_geo or {"type": "FeatureCollection", "features": []})
+    write_json(OUT / "reserves.geojson", reserve_geo or {"type": "FeatureCollection", "features": []})
     write_json(OUT / "species.json", {str(s["id"]): {
         "n": s["common"], "sci": s["scientific"], "fam": s["family"], "nat": s["native"], "c": s["tree_count"]}
         for s in species.values() if s["tree_count"]})

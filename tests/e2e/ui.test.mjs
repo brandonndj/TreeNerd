@@ -257,10 +257,25 @@ test("weather card: every reading names where it's from, lightning first, nothin
   for (const device of ["iPhone SE", "iPhone 15 Pro", "iPad Mini"]) {
     const { ctx, page, errors } = await open("/?near=1.2994,103.8455,250", { ...devices[device], deviceScaleFactor: 1 }, B, fullWeather);
     await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+    if (device.startsWith("iPhone")) {
+      // phones: warnings show, the rest is one summary line until tapped
+      const folded = await page.evaluate(() => ({
+        alerts: [...document.querySelectorAll("#weather .wx-alerts > li")].map((li) => li.textContent.replace(/\s+/g, " ").trim()),
+        hidden: document.querySelector("#weather .wx-more").hidden,
+        summary: document.querySelector("#weather .wx-toggle .wx-sum")?.textContent.replace(/\s+/g, " ").trim(),
+        toggleH: document.querySelector("#weather .wx-toggle")?.getBoundingClientRect().height }));
+      assert.ok(folded.hidden && folded.toggleH >= 43.5, `${device}: ${JSON.stringify(folded)}`);
+      assert.match(folded.alerts.join(" | "), /Lightning ?3\.5 km away[\s\S]*Air \(PM2\.5\) ?72 µg\/m³ elevated[\s\S]*reduce strenuous/, "warnings stay in view");
+      assert.equal(folded.summary, "Raining now · Thundery Showers next 2 h · Heat stress moderate · UV 9");
+      await page.tap("#weather .wx-toggle");
+      assert.equal(await page.isHidden("#weather .wx-more"), false);
+    } else {
+      assert.equal(await page.$("#weather .wx-toggle"), null, "iPad shows every reading at once");
+    }
     const card = await page.evaluate(() => {
       const el = document.querySelector("#weather"), r = el.getBoundingClientRect();
       const t = (e) => (e?.textContent || "").replace(/\s+/g, " ").trim();
-      const rows = [...el.querySelectorAll(".wx-rows > li")].map((li) => { // "label value · where it's from"
+      const rows = [...el.querySelectorAll(".wx-rows > li")].map((li) => { // "label value · where it's from" (warnings first)
         const src = li.querySelector(".wx-src"), v = li.querySelector(".wx-v");
         return src ? `${t(li.querySelector(".wx-k"))} ${t(v).slice(0, t(v).length - t(src).length).trim()} · ${t(src)}` : t(li);
       });
@@ -372,6 +387,55 @@ test("Tree Conservation Areas switch: outlines on the map, kept in the link, unt
   assert.equal(await o.page.$("#tca-link"), null);
   assert.match(await o.page.textContent("#panel-body"), /Conservation area\s*Central Tree Conservation Area/);
   await o.ctx.close();
+});
+
+test("park pages: paths NParks maps, and a nature reserve's note and boundary", async () => {
+  const reserveFiles = [];
+  const asReserve = (c) => {
+    c.on("request", (r) => { if (r.url().includes("/data/reserves.geojson")) reserveFiles.push(r.url()); });
+    return c.route("**/api/place/park/istana-pk-st528", async (r) => {
+      const res = await r.fetch(), d = await res.json();
+      d.name = "Bukit Timah Nature Reserve";
+      d.extra = { ...d.extra, nature_reserve: true, paths: { paths_km: 12.4, cycling_km: 6.1, boardwalk_km: 0.8, has_stairs: true } };
+      await r.fulfill({ response: res, json: d });
+    });
+  };
+  const { ctx, page, errors } = await open("/?p=park/istana-pk-st528", undefined, B, asReserve);
+  await panelTitle(page, "Bukit Timah Nature Reserve");
+  const text = (await page.textContent("#panel-body")).replace(/\s+/g, " ");
+  assert.match(text, /12\.4 km ?of paths · 6\.1 km allow cycling/);
+  assert.match(text, /Includes 0\.8 km of boardwalk or trail; some paths have stairs\. Paths as NParks maps them\./);
+  assert.doesNotMatch(text, /wheelchair/i, "NParks doesn't define its wheeling flag, so nothing is claimed");
+  assert.match(text, /A nature reserve\. NParks: "Our 4 nature reserves safeguard Singapore's ecosystems and are conserved under the Parks and Trees Act\."/);
+  await page.waitForTimeout(500);
+  assert.equal(reserveFiles.length, 1, "the reserve's boundary is drawn");
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // an ordinary park: no reserve note, no path tile without figures
+  const plain = await open("/?p=park/istana-pk-st528");
+  await panelTitle(plain.page, "Istana Park");
+  assert.doesNotMatch(await plain.page.textContent("#panel-body"), /nature reserve|of paths/i);
+  await plain.ctx.close();
+});
+
+test("Nature reserves switch: outlines on, kept in the link; absent on older data", async () => {
+  const files = [];
+  const { ctx, page, errors } = await open("/", undefined, B, (c) => c.on("request", (r) => { if (r.url().includes("/data/reserves.geojson")) files.push(r.url()); }));
+  await page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  if (await page.getAttribute("#legend-toggle", "aria-expanded") === "false") await page.click("#legend-toggle");
+  await page.check("#legend-res");
+  await page.waitForTimeout(300);
+  assert.match(page.url(), /[?&]res=1/);
+  assert.equal(files.length, 1);
+  await page.uncheck("#legend-res");
+  assert.doesNotMatch(page.url(), /[?&]res=1/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  const old = await open("/", undefined, B, (c) => c.route("**/api/meta", async (r) => {
+    const res = await r.fetch(), m = await res.json(); delete m.nature_reserves; await r.fulfill({ response: res, json: m }); }));
+  await old.page.waitForFunction(() => document.querySelector("#total")?.textContent);
+  assert.equal(await old.page.$("#legend-res"), null);
+  await old.ctx.close();
 });
 
 test("tree types: the header keeps the colour key and any filter visible, and Show all undoes it", async () => {
@@ -501,6 +565,7 @@ test("temperature card: shown near the top with station and distance, hidden wit
 test("place pages: road story, residents, amenities and heritage", async () => {
   const { ctx, page, errors } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");
+  assert.match(await page.textContent("#panel-body .sub"), /乌节路/, "the road's name in another script is shown");
   assert.match(await page.textContent("#panel-body"), /About this road[\s\S]*National Library Board/);
   await ctx.close();
   const area = await open("/?p=planning_area/newton");
@@ -615,7 +680,10 @@ test("phone: bottom sheet, collapsed legend, theme toggle", async () => {
   await panelTitle(page, "Orchard Road");
   const box = await page.locator("#panel").boundingBox();
   const vp = page.viewportSize();
-  assert.ok(box.y > vp.height * 0.3 && Math.abs(box.y + box.height - vp.height) < 2, "sheet sits at the bottom");
+  // a card opens at 70% of the screen (owner's choice, 25 Nov 2026): most of it shows, with a strip of map above
+  assert.ok(Math.abs(box.y + box.height - vp.height) < 2, "sheet sits at the bottom");
+  assert.ok(box.height >= vp.height * 0.68 && box.height <= vp.height * 0.72, `sheet is ${Math.round(box.height / vp.height * 100)}% of the screen`);
+  assert.ok(box.y >= 150, "a strip of map stays visible above the card");
   // the close X is drawn large enough to see: an 18-point cross in a 36-point circle
   const x = await page.evaluate(() => {
     const b = document.querySelector("#close"), svg = b.querySelector("svg").getBoundingClientRect();
@@ -637,7 +705,8 @@ const IOS = [["iPhone portrait", "iPhone 15 Pro"], ["iPhone landscape", "iPhone 
 const IOS_VIEWS = ["/", "/?p=road/orchard-road", "/?t=10687021", "/?top=road:trees", "/?top=changes",
   "/?p=trail/central-cycling-paths", "/?p=subzone/ntsz06", "/?near=1.2994,103.8455,250", "/?top=planning_area:per_resident",
   "/?c=2,3", // a tree-type filter on: the "Show all" button and the filtered header
-  "/?p=tca/central-tree-conservation-area", "/?tca=1"]; // a Tree Conservation Area page; the areas switch on
+  "/?p=tca/central-tree-conservation-area", "/?tca=1", // a Tree Conservation Area page; the areas switch on
+  "/?tca=1&res=1"]; // both outline switches on
 
 for (const [label, device] of IOS) {
   test(`${label}: every control is at least 44 x 44 points, nothing overlaps or overflows`, async () => {
@@ -648,7 +717,7 @@ for (const [label, device] of IOS) {
       if (/[?&](p|t|top|near)=/.test(path)) await page.waitForSelector("#panel-body h2");
       else if (path === "/") { await page.tap("#q"); await page.waitForSelector("#results li[role=option]"); }
       else await page.waitForFunction(() => document.querySelector("#total")?.textContent);
-      if (await page.$("#weather")) await page.waitForSelector("#weather:not([hidden]) .wx-rows");
+      if (await page.$("#weather")) await page.waitForSelector("#weather:not([hidden])"); // phones fold the readings
       const report = await page.evaluate(() => {
         const shown = (e) => { const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
           return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && r.bottom > 0 && r.top < innerHeight; };

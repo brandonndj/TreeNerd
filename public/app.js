@@ -205,6 +205,11 @@ map.on("load", async () => {
   map.addLayer({ id: "areas-fill", type: "fill", source: "areas", paint: { "fill-color": css("--c-ink"), "fill-opacity": 0.06 } }, "trees");
   map.addLayer({ id: "areas-line", type: "line", source: "areas", layout: { "line-join": "round" },
     paint: { "line-color": css("--c-ink"), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 15, 2.5], "line-dasharray": [3, 2] } }, "trees");
+  // nature reserve outlines: solid edge, so they're told apart from the dashed conservation areas without colour
+  map.addSource("reserves", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "reserves-fill", type: "fill", source: "reserves", paint: { "fill-color": css("--c-ink"), "fill-opacity": 0.05 } }, "trees");
+  map.addLayer({ id: "reserves-line", type: "line", source: "reserves", layout: { "line-join": "round" },
+    paint: { "line-color": css("--c-ink"), "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.5, 15, 3] } }, "trees");
   map.addSource("trail", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   // drawn bold, with an outline, so it stands out from the basemap's own thin green paths
   map.addLayer({ id: "trail-casing", type: "line", source: "trail", layout: { "line-cap": "round", "line-join": "round" },
@@ -222,7 +227,7 @@ map.on("load", async () => {
   map.addSource("near", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
   map.addLayer({ id: "near", type: "line", source: "near", paint: { "line-color": css("--accent"), "line-width": 2, "line-dasharray": [2, 2] } });
   buildLegend();
-  showAreas(); // a shared link with ?tca=1 opens with the outlines on
+  showAreas(); showReserves(); // a shared link with ?tca=1 or ?res=1 opens with the outlines on
   fetch(`/data/species.json?v=${v}`).then((r) => r.ok && r.json()).then((d) => d && (state.speciesDict = d));
   wireMapEvents();
   restoreFromUrl();
@@ -258,7 +263,11 @@ function showPois(rows) {
     geometry: { type: "Point", coordinates: [Number(p.lng), Number(p.lat)] },
     properties: { kind: p.kind, class: p.class, name: p.name, description: p.description || "", url: p.url || "" } })) });
 }
-function clearOverlays() { showTrail(null); showPois(null); popup?.remove(); if (areaFocus) { areaFocus = null; showAreas(); } }
+function clearOverlays() {
+  showTrail(null); showPois(null); popup?.remove();
+  if (areaFocus) { areaFocus = null; showAreas(); }
+  if (reserveFocus) { reserveFocus = null; showReserves(); }
+}
 let popup = null;
 /** A tapped amenity or heritage site: a small card on the map. */
 function poiPopup(f) {
@@ -286,6 +295,8 @@ function refreshMapTheme() {
     map.setPaintProperty("near", "line-color", css("--accent"));
     map.setPaintProperty("areas-fill", "fill-color", css("--c-ink"));
     map.setPaintProperty("areas-line", "line-color", css("--c-ink"));
+    map.setPaintProperty("reserves-fill", "fill-color", css("--c-ink"));
+    map.setPaintProperty("reserves-line", "line-color", css("--c-ink"));
     map.setPaintProperty("trail", "line-color", TRAIL_COLOR());
     map.setPaintProperty("trail-casing", "line-color", dark() ? "#0f1411" : "#ffffff");
     for (const [k, v] of Object.entries(poiPaint())) map.setPaintProperty("pois", k, v);
@@ -398,7 +409,9 @@ function buildLegendItems() {
       <span class="n">${counts[c.key] ? fmt.format(counts[c.key]) : ""}</span></label>`).join("") +
     `<button class="legend-all" id="legend-all" hidden>Show all</button>` +
     (hasAreas() ? `<label class="legend-area"><input type="checkbox" id="legend-tca" ${areasOn ? "checked" : ""}>
-      <span class="area-swatch" aria-hidden="true"></span>Tree Conservation Areas</label>` : "");
+      <span class="area-swatch" aria-hidden="true"></span>Tree Conservation Areas</label>` : "") +
+    (hasReserves() ? `<label class="legend-area${hasAreas() ? " next" : ""}"><input type="checkbox" id="legend-res" ${reservesOn ? "checked" : ""}>
+      <span class="area-swatch solid" aria-hidden="true"></span>Nature reserves</label>` : "");
   updateLegendHeader();
 }
 /**
@@ -435,6 +448,13 @@ function buildLegend() {
     updateLegendHeader();
   };
   $("#legend-items").addEventListener("change", (e) => {
+    if (e.target.id === "legend-res") { // likewise
+      reservesOn = e.target.checked;
+      const u = new URL(location.href);
+      reservesOn ? u.searchParams.set("res", "1") : u.searchParams.delete("res");
+      history.replaceState(null, "", u);
+      return showReserves();
+    }
     if (e.target.id === "legend-tca") { // an outline on the map, not a tree filter
       areasOn = e.target.checked;
       const u = new URL(location.href);
@@ -516,6 +536,19 @@ async function showAreas() {
   } catch { areaShapes = null; return; }
   src.setData({ type: "FeatureCollection", features: areaShapes.features.filter((f) => areasOn || f.properties.s === areaFocus) });
 }
+// The four gazetted nature reserves (NParks), drawn like the conservation areas; from builds that have them
+const hasReserves = () => Number(state.meta?.nature_reserves) > 0;
+let reserveShapes = null, reservesOn = new URL(location.href).searchParams.get("res") === "1", reserveFocus = null;
+async function showReserves() {
+  const src = map.getSource("reserves");
+  if (!src) return;
+  if (!hasReserves() || (!reservesOn && !reserveFocus)) return src.setData(EMPTY);
+  try {
+    reserveShapes ||= await fetch(`/data/reserves.geojson?v=${encodeURIComponent(state.meta?.built_at || "")}`).then((r) => (r.ok ? r.json() : EMPTY));
+  } catch { reserveShapes = null; return; }
+  src.setData({ type: "FeatureCollection", features: reserveShapes.features.filter((f) => reservesOn || f.properties.s === reserveFocus) });
+}
+const NPARKS_RESERVES = "https://www.nparks.gov.sg/visit/when-visiting-parks/about-parks-nature-reserves-pcns";
 /** Slug of a Tree Conservation Area from its name, as the pipeline makes it (pipeline/common.py slugify). */
 const slugify = (n) => n.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x00-\x7f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 // NParks' current page on Tree Conservation Areas (the link inside NParks' dataset no longer works)
@@ -583,8 +616,10 @@ function choose(r) {
 // ------------------------------------------------------------------ panel / bottom sheet
 const panel = $("#panel"), body = $("#panel-body"), handle = $("#handle");
 const SHEET_ORDER = ["peek", "half", "full"];
+// A card opens at 70% of the screen on phones: most of its content shows, with a strip of map above for the
+// place; the X (or a swipe down) goes back to the map.
 function sheetHeight(mode) {
-  return { peek: 150, half: Math.round(innerHeight * 0.5), full: innerHeight }[mode];
+  return { peek: 150, half: Math.round(innerHeight * 0.7), full: innerHeight }[mode];
 }
 function setSheet(mode) {
   state.sheet = mode;
@@ -727,13 +762,16 @@ async function openPlace(kind, slug, bbox, fly = true) {
   catch (e) { return seq === navSeq && openPanel(`<h2>Not found</h2><p class="muted">${esc(e.message)}</p>`); }
   if (seq !== navSeq) return;
   state.place = d; state.species = null; state.placeSpecies = null;
-  setUrl({ p: `${kind}/${slug}` });
+  setUrl({ p: `${kind}/${d.slug || slug}` }); // an old section link shows the park's own address
   if (fly) fitBbox(d.bbox || bbox, kind === "road" ? 18 : 17);
   popup?.remove();
   showTrail(kind === "trail" ? d.slug : null);
   showPois(d.pois);
   areaFocus = kind === "tca" ? d.slug : null;
   showAreas();
+  // a park that is a gazetted nature reserve shows the reserve's legal boundary (matched by name)
+  reserveFocus = kind === "park" && d.extra?.nature_reserve ? slugify(d.name) : null;
+  showReserves();
   await highlightPlace(d);
   if (seq === navSeq) renderPlace(d);
 }
@@ -788,8 +826,13 @@ function renderPlace(d) {
       ${statTile(tonnes(d.carbon_kg), "carbon stored (est.)")}
       ${extra.trees_per_km != null ? statTile(fmt.format(extra.trees_per_km), `trees per km · ${fmt.format(extra.length_km)} km long`) : ""}
       ${extra.trees_per_1000_residents != null ? statTile(fmt.format(extra.trees_per_1000_residents), "trees per 1,000 residents") : ""}
+      ${extra.paths ? statTile(`${fmt.format(extra.paths.paths_km)} km`, `of paths${extra.paths.cycling_km ? ` · ${fmt.format(extra.paths.cycling_km)} km allow cycling` : " · no cycling"}`) : ""}
     </div>
+    ${extra.paths && (extra.paths.boardwalk_km || extra.paths.has_stairs) ? `<p class="note">${[
+      extra.paths.boardwalk_km ? `Includes ${fmt.format(extra.paths.boardwalk_km)} km of boardwalk or trail` : "",
+      extra.paths.has_stairs ? "some paths have stairs" : ""].filter(Boolean).join("; ").replace(/^s/, "S")}. Paths as NParks maps them.</p>` : ""}
     ${residentsNote(extra)}
+    ${d.kind === "park" && extra.nature_reserve ? `<div class="callout">A nature reserve. NParks: "Our 4 nature reserves safeguard Singapore's ecosystems and are conserved under the Parks and Trees Act." <a href="${NPARKS_RESERVES}" target="_blank" rel="noopener noreferrer">NParks ↗</a></div>` : ""}
     ${placeWeatherPoint(d) ? WEATHER_SLOT : ""}
     ${extra.type ? `<p class="note">${esc(extra.type)}. Trees counted are those within ${M("trail_max_m")} m of the route that NParks records; forest trees are not recorded one by one.</p>` : ""}
     ${extra.story ? `<h3>About this road</h3><p>${esc(extra.story)}</p><p class="note">From the ${esc(extra.story_source || "National Library Board")}.</p>` : ""}
@@ -1104,21 +1147,28 @@ async function showWeather(lat, lng, from = "this spot") {
   try { d = await api(`/api/weather?lat=${lat.toFixed(3)}&lng=${lng.toFixed(3)}`); } catch { return; }
   const el = $("#weather");
   if (!el || el !== slot || !d) return; // the panel changed while waiting: this reading is for another place
-  const w = d.reading, rows = [];
+  const w = d.reading, alerts = [], rows = [];
+  // warnings always show; on phones the other readings fold into a one-line summary (tap for details)
   if (d.lightning) {
     const l = d.lightning, more = l.count > 1 ? `, ${l.count} strikes within 10 km` : "";
-    rows.push(wxRow("⚡ Lightning", `<b>${away(l.dist_m)}${l.dist_m < 100 ? "" : " away"}</b>`, `${esc(hm(l.at))}${l.kind ? ` · ${esc(l.kind.toLowerCase())}` : ""}${more}`, "wx-alert"));
+    alerts.push(wxRow("⚡ Lightning", `<b>${away(l.dist_m)}${l.dist_m < 100 ? "" : " away"}</b>`, `${esc(hm(l.at))}${l.kind ? ` · ${esc(l.kind.toLowerCase())}` : ""}${more}`, "wx-alert"));
   }
   if (d.rain) rows.push(wxRow("Raining now", `<b>${Number(d.rain.mm)} mm</b> in 5 min`, `${esc(d.rain.station)} rain gauge, ${away(d.rain.dist_m)} · ${esc(hm(d.rain.at))}`));
   if (d.forecast) rows.push(wxRow("Next 2 hours", `<b>${esc(d.forecast.text)}</b>`, `${esc(d.forecast.area)} area, until ${esc(hm(d.forecast.until))}`));
   if (d.heat) rows.push(wxRow("Heat stress", `<b>${esc(d.heat.level)}</b> (WBGT ${Number(d.heat.wbgt).toFixed(1)} °C)`, `${esc(d.heat.station)}, ${away(d.heat.dist_m)} · ${esc(hm(d.heat.at))}`));
   if (d.uv) rows.push(wxRow("UV index", `<b>${Number(d.uv.index)} ${esc(d.uv.level.toLowerCase())}</b>`, `measured at Changi · ${esc(hour(d.uv.at))}`));
   if (d.air) {
-    const a = d.air;
-    rows.push(wxRow("Air (PM2.5)", `<b>${Number(a.pm25)} µg/m³ ${esc(a.band.toLowerCase())}</b>`, `NEA ${esc(a.region)} region · ${esc(hour(a.at))}`));
-    if (a.advice) rows.push(`<li class="wx-advice"><span></span><span>${esc(a.advice)} <span class="muted">(NEA)</span></span></li>`);
+    const a = d.air, row = wxRow("Air (PM2.5)", `<b>${Number(a.pm25)} µg/m³ ${esc(a.band.toLowerCase())}</b>`, `NEA ${esc(a.region)} region · ${esc(hour(a.at))}`);
+    if (a.advice) alerts.push(row, `<li class="wx-advice"><span></span><span>${esc(a.advice)} <span class="muted">(NEA)</span></span></li>`);
+    else rows.push(row);
   }
-  if (!w && !rows.length) return;
+  if (!w && !rows.length && !alerts.length) return;
+  const fold = isPhone() && rows.length > 0;
+  let open = false;
+  try { open = localStorage.getItem("wx-open") === "1"; } catch { /* private mode */ }
+  const summary = [d.rain && "Raining now", d.forecast && `${d.forecast.text} next 2 h`, d.heat && `Heat stress ${d.heat.level.toLowerCase()}`,
+    d.uv && `UV ${Number(d.uv.index)}`].filter(Boolean).map(esc).join(" · ");
+  const note = `<p class="weather-note">Latest readings from NEA, each from the station, area or region named; distances are from ${esc(from)}. They aren't a measure of how much the trees cool it.</p>`;
   el.dataset.band = w ? tempBand(Number(w.celsius)) : "none";
   el.innerHTML = (w ? `
     <div class="weather-main">
@@ -1129,8 +1179,16 @@ async function showWeather(lat, lng, from = "this spot") {
     <div class="weather-where">
       <span>${esc(w.station)} station</span>
       <span class="muted">${away(w.dist_m)}${w.dist_m < 100 ? "" : " away"} · ${esc(hm(w.at))}</span>
-    </div>` : "") + (rows.length ? `<ul class="wx-rows">${rows.join("")}</ul>` : "") + `
-    <p class="weather-note">Latest readings from NEA, each from the station, area or region named; distances are from ${esc(from)}. They aren't a measure of how much the trees cool it.</p>`;
+    </div>` : "")
+    + (alerts.length ? `<ul class="wx-rows wx-alerts">${alerts.join("")}</ul>` : "")
+    + (fold ? `<button class="wx-toggle" aria-expanded="${open}" aria-controls="wx-more"><span class="wx-sum">${summary || "More readings"}</span><span class="wx-chev" aria-hidden="true">▾</span></button>` : "")
+    + `<div class="wx-more" id="wx-more"${fold && !open ? " hidden" : ""}>${rows.length ? `<ul class="wx-rows">${rows.join("")}</ul>` : ""}${note}</div>`;
+  el.querySelector(".wx-toggle")?.addEventListener("click", (e) => {
+    const b = e.currentTarget, now = b.getAttribute("aria-expanded") !== "true";
+    b.setAttribute("aria-expanded", String(now));
+    el.querySelector(".wx-more").hidden = !now;
+    try { localStorage.setItem("wx-open", now ? "1" : "0"); } catch { /* private mode */ } // remembered for the next card
+  });
   el.hidden = false;
 }
 
@@ -1268,6 +1326,8 @@ $("#about").addEventListener("click", () => {
         <li><b>Trails</b> count the trees NParks records within ${M("trail_max_m")} m of the route. Nature reserve trails aren't listed, because forest trees aren't recorded one by one.</li>
         <li><b>Trees per resident</b> uses the ${METHOD.residents_year} census, which counts residents only. Areas with under ${M("min_residents")} residents get no figure.</li>
         <li><b>Weather</b> appears on trees, parks, areas, subzones, roads up to ${WEATHER_MAX_EXTENT_KM} km across, and around any spot. It comes live from NEA, and each reading names where it's from. For a place, distances are measured from the middle of the box that contains it, which for an irregular shape can lie just outside it. Air temperature and heat stress are from the nearest station, rain from the nearest rain gauge (shown only while it records rain), and the 2-hour forecast is for the nearest of NEA's forecast areas. Lightning is shown when NEA records a strike within 10 km in the last 15 minutes. The UV index is NEA's single reading for Singapore, measured at Changi. PM2.5 is the 1-hour reading for the nearest of NEA's regions (north, south, east, west, central), with NEA's band and advice. Old readings aren't shown. None of this measures how much trees cool a place.</li>
+        <li><b>Nature reserves</b> are the four gazetted reserves (Central Catchment, Bukit Timah, Sungei Buloh and Labrador), with their legal boundaries from NParks' Nature Reserves Gazette. NParks: they "safeguard Singapore's ecosystems and are conserved under the Parks and Trees Act".</li>
+        <li><b>Park paths</b> are the paths NParks maps in each park (open to walking), with how much allows cycling, boardwalks and whether any have stairs. A path belongs to the park its midpoint is in. They don't say whether a path suits wheelchairs: NParks' data doesn't define that.</li>
         <li><b>Tree Conservation Areas</b> are NParks' two gazetted areas (Central and Changi), with boundaries from NParks. ${esc(TCA_RULE)} The rule covers private land too, but most private trees aren't in NParks' records, so they aren't on this map. The site doesn't say whether a particular tree needs approval: NParks' records don't say at what height each girth was measured.</li>
         <li><b>The "Conservation" tree type</b> is NParks' own layer of "conservation trees". NParks doesn't publish what it covers; most of these trees are in nature parks and reserves. It isn't the same as the Tree Conservation Areas: most trees in those areas are street, park or Botanic Gardens trees.</li>
         <li><b>Heights</b> are published in 3 m bands.</li>

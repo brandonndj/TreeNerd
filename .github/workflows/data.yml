@@ -47,6 +47,15 @@ jobs:
           cache-dependency-path: pipeline/requirements.txt
       - run: pip install --require-hashes -r pipeline/requirements.lock
 
+      # Kew's species checklist: the last copy is kept, so the update still runs if Kew is unreachable
+      # (pipeline/fetch.py uses it only when a fresh download fails)
+      - name: Restore the last species checklist
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/raw/wcvp.zip
+          key: wcvp-${{ github.run_id }}
+          restore-keys: wcvp-
+
       - name: Cache tippecanoe
         id: tippecanoe
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -184,6 +193,7 @@ jobs:
           put "species-$NEXT.json" species.json application/json
           put "trails-$NEXT.geojson" trails.geojson application/geo+json
           put "tca-$NEXT.geojson" tca.geojson application/geo+json
+          put "reserves-$NEXT.geojson" reserves.geojson application/geo+json
 
       - name: Switch the site to the new database
         if: env.PUBLISH == 'true'
@@ -208,6 +218,7 @@ jobs:
           put species.json species.json application/json
           put trails.geojson trails.geojson application/geo+json
           put tca.geojson tca.geojson application/geo+json
+          put reserves.geojson reserves.geojson application/geo+json
           put meta.json meta.json application/json
           put trees.csv.gz trees.csv.gz application/gzip
           put "snapshots/$(date -u +%F)/trees.csv.gz" trees.csv.gz application/gzip

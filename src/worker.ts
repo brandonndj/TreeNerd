@@ -10,6 +10,7 @@ import { cleanQuery, parseOnemap, type OnemapHit } from "./geocode";
 import { PAGE_HEADERS, pageMeta, sitemap, withMeta } from "./pages";
 import { serveTiles } from "./tiles";
 import { type Check, type Level, type Report, ago, overall, renderStatus } from "./status";
+import { rebuildDue } from "./schedule";
 import { FEEDS, type Feed, air, feedProblems, forecast, heat, lightning, rain, temperature, uv } from "./weather";
 import { SearchIndex, type Entry } from "./search";
 
@@ -35,10 +36,10 @@ const PLACE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id",
   pcn: "pcn_id", constituency: "ed_id", heritage_road: "hr_id",
 };
-const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson", "tca.geojson"]);
+const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson", "tca.geojson", "reserves.geojson"]);
 // Files that belong to one database build ("<name>-a.<ext>" / "-b"); see getSlotObject.
 const SLOT_FILES: Record<string, [string, string]> = {
-  "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"], "tca.geojson": ["tca", "geojson"],
+  "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"], "tca.geojson": ["tca", "geojson"], "reserves.geojson": ["reserves", "geojson"],
 };
 /**
  * Kinds of place that have a page: the column-based ones, plus trails (a tree can be on several) and
@@ -210,7 +211,12 @@ function placeCondition(kind: string) {
 
 async function getPlace(env: Env, kind: string, slug: string) {
   if (!PLACE_KINDS.has(kind) || !SLUG_RE.test(slug)) throw new HttpError(404, "not found");
-  const place = await env.DB.prepare("SELECT * FROM places WHERE kind=? AND slug=?").bind(kind, slug).first();
+  let place = await env.DB.prepare("SELECT * FROM places WHERE kind=? AND slug=?").bind(kind, slug).first();
+  // a park NParks lists in sections is one place now; links to a section's old page find the park
+  if (!place && kind === "park") {
+    place = await env.DB.prepare(`SELECT p.* FROM places p, json_each(p.extra, '$.former_slugs') f
+      WHERE p.kind='park' AND f.value=? LIMIT 1`).bind(slug).first().catch(() => null);
+  }
   if (!place) throw new HttpError(404, "not found");
   return { place, cond: placeCondition(kind) };
 }
@@ -259,7 +265,8 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   return json({
     changes: await placeChanges(env, kind, place.id as number),
     pois: await placePois(env, kind, place.id as number),
-    kind, slug, name: place.name, alt: parseJSON(place.alt, []),
+    // slug: the park's own address, also when it was reached by an old section address
+    kind, slug: place.slug as string, name: place.name, alt: parseJSON(place.alt, []),
     tree_count: place.tree_count, species_count: place.species_count,
     heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
     bbox: parseJSON(place.bbox, null), extra: parseJSON(place.extra, {}),
@@ -504,7 +511,8 @@ const neaHeaders = (env: Env): Record<string, string> => ({
 // 6 without). Everything that reads NEA (visitors' cards, the hourly check, /status) goes through this
 // one shared cache, so all of them together make at most 7 requests per feed interval per data centre.
 const NEA_CACHE_S = 120;
-const NEA_BACKOFF_S = 20; // after a refusal (429) or an NEA error, don't ask again for this long
+const NEA_BACKOFF_S = 20;
+const NEA_BAD_REPLY = 502; // what a 200 reply that isn't valid JSON is recorded as // after a refusal (429) or an NEA error, don't ask again for this long
 interface NeaFetch { body: unknown; status: number; fetched_at: number; cached: boolean; error?: string }
 
 /** One NEA feed from the shared edge cache, or from NEA. A refusal is remembered briefly, so callers back off. */
@@ -526,8 +534,15 @@ async function neaFetch(feed: Feed, env: Env, ctx: ExecutionContext, signal?: Ab
       return { body: null, status: up.status, fetched_at: Date.now(), cached: false };
     }
     const text = await up.text();
+    let body: unknown;
+    try { body = JSON.parse(text); } catch {
+      // a 200 that isn't data is treated like an error: backed off briefly, never cached as healthy
+      console.error(`NEA ${feed}: HTTP 200 but not valid JSON`);
+      remember("", NEA_BAD_REPLY, NEA_BACKOFF_S);
+      return { body: null, status: NEA_BAD_REPLY, fetched_at: Date.now(), cached: false };
+    }
     remember(text, 200, NEA_CACHE_S);
-    return { body: JSON.parse(text), status: 200, fetched_at: Date.now(), cached: false };
+    return { body, status: 200, fetched_at: Date.now(), cached: false };
   } catch (e) {
     console.error(`NEA ${feed} unavailable:`, String(e));
     return { body: null, status: 0, fetched_at: Date.now(), cached: false, error: String(e) };
@@ -700,24 +715,21 @@ async function data(request: Request, env: Env, url: URL) {
 async function checkForNewData(env: Env) {
   // what the status page shows as the last freshness check (one row, ~120 writes a month)
   await env.DB.prepare("INSERT OR REPLACE INTO meta VALUES ('freshness_last_check', ?)").bind(String(Date.now())).run().catch(() => {});
-  const res = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } });
-  if (!res.ok) throw new Error(`upstream returned ${res.status}`);
-  const layer = await res.json<{ editingInfo?: { lastEditDate?: number } }>();
-  const lastEdit = layer.editingInfo?.lastEditDate;
   const meta = await getMeta(env);
-  const built = meta?.source_last_edit ? Date.parse(String(meta.source_last_edit)) : 0;
   const last = await env.DB.prepare("SELECT value FROM meta WHERE key='last_dispatch'").first<{ value: string }>()
     .catch(() => null);
-  const sinceDispatch = Date.now() - Number(last?.value ?? 0);
-  // Data is rebuilt once a week by the data workflow's own schedule. This check only steps in when
-  // that was missed: a build older than 8 days means a run failed or never started.
-  // It does NOT rebuild whenever the source changes. The source changes almost daily, and every
-  // rebuild rewrites the whole database, which is billed per row written (see schema.sql).
-  const builtAt = meta?.built_at ? Date.parse(String(meta.built_at)) : 0;
-  const overdue = Date.now() - builtAt > 8 * 86400_000;
-  const changed = !!lastEdit && lastEdit > built + 60_000;
-  if (overdue) console.error(`data is ${Math.round((Date.now() - builtAt) / 86400_000)} days old: the weekly update was missed`);
-  if (!overdue || !changed || sinceDispatch < 20 * 3600_000) return;
+  // Data is rebuilt once a week by the data workflow's own schedule. This check only steps in when that
+  // was missed (see rebuildDue): it does NOT rebuild whenever the source changes, which is almost daily,
+  // because every rebuild rewrites the whole database, billed per row written (see schema.sql). Whether
+  // NParks has edited since is logged, not required: other sources may have changed, and a site marked
+  // "update overdue" should recover on its own.
+  const builtAt = meta?.built_at ? Date.parse(String(meta.built_at)) : NaN;
+  if (!rebuildDue({ now: Date.now(), builtAt, lastDispatch: Number(last?.value ?? 0) })) return;
+  const lastEdit = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: { "user-agent": "TreeNerd (+https://treenerd.fyi)" } })
+    .then((r) => (r.ok ? r.json<{ editingInfo?: { lastEditDate?: number } }>() : null)).then((l) => l?.editingInfo?.lastEditDate).catch(() => undefined);
+  const built = meta?.source_last_edit ? Date.parse(String(meta.source_last_edit)) : 0;
+  console.error(`data is ${Number.isFinite(builtAt) ? Math.round((Date.now() - builtAt) / 86400_000) : "?"} days old: the weekly update was missed`
+    + ` (NParks ${lastEdit === undefined ? "couldn't be checked" : lastEdit > built + 60_000 ? "has edited since" : "hasn't edited since"})`);
   if (!env.GITHUB_TOKEN) return console.warn("a rebuild is needed; automatic rebuild is not configured");
   const gh = await fetch(
     `https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW}/dispatches`,
@@ -822,7 +834,7 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
 
   // ---- live checks, all at once
   const feeds = Object.keys(FEEDS) as Feed[];
-  const [neaRes, arcgis, onemapSearch, basemap, github] = await Promise.all([
+  const [neaRes, arcgis, onemapSearch, basemap, github, workflow] = await Promise.all([
     Promise.all(feeds.map((f) => timed((signal) => neaFetch(f, env, ctx, signal)))),
     timed(async (signal) => {
       const r = await fetch(`${env.ARCGIS_TREES_LAYER}?f=json`, { headers: ua, signal });
@@ -840,6 +852,13 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
       return (await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}`, {
         headers: { ...ua, authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json" }, signal })).status;
     }),
+    // GitHub switches off scheduled workflows after 60 days without activity in a public repository
+    timed(async (signal) => {
+      if (!env.GITHUB_TOKEN || !env.GITHUB_REPO || !env.GITHUB_WORKFLOW) return null;
+      const r = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/actions/workflows/${env.GITHUB_WORKFLOW}`, {
+        headers: { ...ua, authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json" }, signal });
+      return r.ok ? ((await r.json<{ state?: string }>()).state ?? "unknown") : `HTTP ${r.status}`;
+    }),
   ]);
 
   const problems = feedProblems(Object.fromEntries(feeds.map((f, i) => [f, neaRes[i].value?.body ?? null])), now);
@@ -850,6 +869,7 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
     const level: Level = r.error || !v || v.error || v.status === 0 ? "fail" : v.status === 429 ? "warn" : v.status !== 200 ? "fail" : p ? "warn" : "ok";
     const detail = r.error ? `unreachable: ${r.error}` : v!.error || v!.status === 0 ? `unreachable: ${v!.error ?? "no answer"}`
       : v!.status === 429 ? `data.gov.sg asked us to slow down (HTTP 429)${when}; the card leaves this reading out meanwhile`
+      : v!.status === NEA_BAD_REPLY ? `NEA's reply wasn't valid data${when}; the card leaves this reading out meanwhile`
       : v!.status !== 200 ? `HTTP ${v!.status}${v!.status === 401 || v!.status === 403 ? " (is the API key valid?)" : ""}${when}`
       : p ? `${p.slice(f.length + 2)}${when}` : `giving readings${when}`;
     return { name: `NEA ${f}`, level, detail, ms: v?.cached ? undefined : r.ms };
@@ -894,6 +914,12 @@ async function statusReport(env: Env, ctx: ExecutionContext): Promise<Report> {
     { name: "NEA alert", level: neaAlerted ? "fail" : neaSince ? "warn" : "ok",
       detail: neaAlerted ? `issue opened ${ago(Number(neaAlerted), now)}; problem since ${ago(Number(neaSince), now)}`
         : neaSince ? `a problem started ${ago(Number(neaSince), now)}; an issue opens if it lasts an hour` : "no open problem" },
+    { name: "Weekly update workflow (GitHub)", ms: workflow.ms,
+      level: !set(env.GITHUB_TOKEN) ? "off" : workflow.value === "active" ? "ok" : "fail",
+      detail: !set(env.GITHUB_TOKEN) ? "can't be checked without the GitHub token"
+        : workflow.value === "active" ? "switched on, runs every Sunday"
+        : workflow.value === "disabled_inactivity" ? "switched off by GitHub after 60 days without activity: re-enable it in the repository's Actions tab"
+        : workflow.value ? `GitHub reports it as ${workflow.value}` : `couldn't be checked: ${workflow.error}` },
     !freshLast ? notYet(6 * 3600_000, "Freshness check (every 6 h)")
       : { name: "Freshness check (every 6 h)", level: now - Number(freshLast) > 7 * 3600_000 ? "fail" : "ok",
         detail: `last ran ${ago(Number(freshLast), now)}${lastDispatch ? `; last asked for a rebuild ${ago(Number(lastDispatch), now)}` : ""}` },

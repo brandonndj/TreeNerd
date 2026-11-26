@@ -121,6 +121,22 @@ def consistency(db: sqlite3.Connection, meta: dict, search: list[dict]) -> list[
                                AND NOT EXISTS (SELECT 1 FROM places p WHERE p.kind='tca' AND p.name=t.tca)""")
     check(stray == 0, f"{stray} trees are in a Tree Conservation Area that has no page")
 
+    # park paths: only on parks, internally consistent, and adding up to the build's summary
+    n_paths, km = 0, 0.0
+    for r in db.execute("SELECT kind, slug, extra FROM places WHERE extra LIKE '%\"paths\"%'"):
+        p = json.loads(r["extra"] or "{}").get("paths")
+        if not p:
+            continue
+        where = f"{r['kind']}/{r['slug']}"
+        check(r["kind"] == "park", f"{where}: path figures on a place that isn't a park")
+        check(0 < p["paths_km"] and 0 <= p["cycling_km"] <= p["paths_km"] + 0.05 and 0 <= p["boardwalk_km"] <= p["paths_km"] + 0.05,
+              f"{where}: path figures don't add up {p}")
+        n_paths, km = n_paths + 1, km + p["paths_km"]
+    summary = meta.get("park_paths")
+    if summary is not None:
+        check(summary["parks"] == n_paths and abs(summary["km"] - km) < 0.05 * max(1, n_paths),
+              f"park paths differ from the summary: {n_paths} parks, {km:.1f} km vs {summary}")
+
     # trees per 1,000 residents: only for areas with enough residents, and exactly tree_count / residents
     for r in db.execute("SELECT kind, slug, tree_count, extra FROM places WHERE kind IN ('planning_area', 'subzone')"):
         extra = json.loads(r["extra"] or "{}")
@@ -182,6 +198,26 @@ def plausibility(db: sqlite3.Connection, meta: dict, prev_meta: dict | None) -> 
     if prev_meta and prev_meta.get("tree_count"):
         change = abs(n - prev_meta["tree_count"]) / prev_meta["tree_count"]
         check(change <= 0.10, f"tree count moved {change:.1%} since the previous build ({prev_meta['tree_count']} -> {n})")
+    if prev_meta:
+        # Optional sources (amenities, trails, heritage sites, stations...) are skipped when their download
+        # fails, so a whole layer could vanish quietly. Compare with the previous build instead: a drop of
+        # over 20% stops the update, and the site keeps the previous data until someone looks.
+        before, after = prev_meta.get("place_counts") or {}, meta.get("place_counts") or {}
+        for kind, b in before.items():
+            check(after.get(kind, 0) >= 0.8 * b, f"{after.get(kind, 0)} {kind} places, down from {b} at the previous update (did a source fail to download?)")
+        before, after = prev_meta.get("poi_counts") or {}, meta.get("poi_counts") or {}
+        for cls, b in before.items():
+            if b >= 10:  # small classes come and go
+                check(after.get(cls, 0) >= 0.8 * b, f"{after.get(cls, 0)} {cls} points, down from {b} at the previous update (did a source fail to download?)")
+        if prev_meta.get("nature_reserves"):
+            check((meta.get("nature_reserves") or 0) >= prev_meta["nature_reserves"],
+                  f"{meta.get('nature_reserves') or 0} nature reserve outlines, down from {prev_meta['nature_reserves']} at the previous update")
+        if (prev_meta.get("park_paths") or {}).get("parks"):
+            check((meta.get("park_paths") or {}).get("parks", 0) >= 0.8 * prev_meta["park_paths"]["parks"],
+                  f"{(meta.get('park_paths') or {}).get('parks', 0)} parks with path figures, down from {prev_meta['park_paths']['parks']} at the previous update")
+        if prev_meta.get("trail_trees"):
+            check((meta.get("trail_trees") or 0) >= 0.8 * prev_meta["trail_trees"],
+                  f"{meta.get('trail_trees') or 0} trees on trails, down from {prev_meta['trail_trees']} at the previous update")
     check(one("SELECT count(*) FROM trees WHERE NOT (lat BETWEEN 1.15 AND 1.49 AND lng BETWEEN 103.59 AND 104.10)") == 0,
           "trees outside Singapore")
     check(one("SELECT count(*) FROM trees WHERE girth_m <= 0 OR girth_m > 100") == 0, "girth out of range")

@@ -151,6 +151,14 @@
           "MORE_INFO"
         ]
       },
+      "nature_reserves_gazette": {
+        "id": "d_dfd037f5064cb2e2b2e358ceeccb4af7",
+        "required": false,
+        "fields": [
+          "NAT_RES_NA"
+        ],
+        "use": "Gazetted boundaries of the four nature reserves (Parks and Trees Act), drawn on the map"
+      },
       "parks_points": {
         "id": "d_0542d48f0991541706b58059381a6eca",
         "required": false,

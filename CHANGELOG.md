@@ -2,6 +2,30 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-26: Nature reserves, park paths, one Botanic Gardens
+
+### Added
+- Nature reserves (arriving with the weekly data update early Monday, Singapore time): switch on "Nature reserves" in the Tree types panel to see the legal boundaries of Singapore's four nature reserves, Central Catchment, Bukit Timah, Sungei Buloh and Labrador. Their park pages show the boundary and say they're conserved under the Parks and Trees Act.
+- Park paths (also from Monday): park pages show how many km of paths NParks maps there and how much allows cycling, plus boardwalks and stairs where there are some.
+
+### Changed
+- On iPhone, a card now opens taller, so you see more of it at once; a strip of map stays above it, and the X takes you back to the map.
+- On iPhone, the weather card is shorter: the temperature, then one line such as "Partly cloudy next 2 h · Heat stress low". Tap it for every reading and where it's from. Lightning warnings, and air quality outside "Normal", always show.
+- From Monday, Singapore Botanic Gardens is one page instead of NParks' four management zones, and parks NParks lists in sections (such as Bishan-Ang Mo Kio Park) are one page each. Old links to a section still open the park.
+
+### Internal
+- Parks: sections of one park are one place (`park_display_names`); their old addresses are kept in `extra.former_slugs` and the Worker finds the park from them. Park paths come from NParks Tracks (already downloaded) and are audited against a new `meta.park_paths` summary. Nature reserve outlines (`reserves.geojson`, per database) come from NParks' Nature Reserves Gazette, a new optional download. Review findings that aren't built yet are kept in `docs/BACKLOG.md`.
+
+## 2026-11-25: Steadier updates and weather
+
+### Internal
+- Fixed two crashes in the data update that unit tests didn't reach, found by running the full build locally: `write_outputs` used the `extras` module without importing it (method limits) and wrote the Tree Conservation Area outlines without receiving them. `tests/test_names.py` now checks every name a pipeline function uses is defined where it runs.
+- The audit compares each kind of place, each amenity class and the trees on trails with the previous update; a drop of over 20% (a source that failed to download) stops the update instead of publishing without it.
+- Kew's species checklist falls back to the copy kept by the data workflow when Kew can't be reached.
+- `/status` shows whether GitHub still runs the weekly update workflow (it switches off scheduled workflows after 60 days without activity).
+- The missed-update check now asks for the data update whenever the data is over 8 days old (at most once every 20 hours), without also requiring an NParks edit. The decision is `rebuildDue` in `src/schedule.ts`, tested in `tests/schedule.test.mjs`.
+- An NEA reply with HTTP 200 that isn't valid JSON is no longer cached as healthy for 2 minutes: it's backed off for 20 seconds like an error, and `/status` says so.
+
 ## 2026-11-25: Tree Conservation Areas
 
 ### Added
@@ -16,7 +40,7 @@ What changed for people using TreeNerd, newest first. New entries are posted to 
 
 ### Internal
 - The site no longer names the owner's GitHub account: `/status` says the token is "accepted for the repository", and `/.well-known/security.txt` gives the Telegram channel as the contact. A test checks every page and public file for the account name, read from `wrangler.jsonc`.
-- New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); its map extent is the boundary's, not the recorded trees'; `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are NParks' boundaries as published, every point kept (about 80 KB), as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
+- New place kind `tca`: figures are worked out by the build and audited (`pipeline/audit.py`); its map extent is the boundary's, not the recorded trees'; `/api/place/tca/...` runs no tree queries and its tree list returns 404, so no new index. Outlines are NParks' boundaries as published, to about 10 cm (about 80 KB), as `tca-{a,b}.geojson` with each database and `tca.geojson`. The test fixture gains the Central area (counted from the fixture's own trees) and its outline; `make_fixture.py` keeps areas from now on.
 
 ## 2026-11-25: Steadier weather readings
 

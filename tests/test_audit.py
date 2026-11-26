@@ -97,6 +97,24 @@ class TreeConservationAreaTests(unittest.TestCase):
         self.assertIn("map extent", self.build(bbox=(103.835, 1.29, 103.85, 1.31)))  # misses the tree at 103.83
 
 
+class ParkPathTests(unittest.TestCase):
+    def problems(self, paths, summary, kind="park"):
+        db = make_db()
+        db.execute("""INSERT INTO places (id, kind, slug, name, tree_count, species_count, heritage_count, carbon_kg, top_species, extra)
+                      VALUES (50, ?, 'p', 'P', 0, 0, 0, 0, '[]', ?)""", (kind, json.dumps({"paths": paths})))
+        meta = {**META, "park_paths": summary, "place_counts": {**META["place_counts"], kind: META["place_counts"].get(kind, 0) + 1}}
+        return "\n".join(audit.consistency(db, meta, SEARCH + [{"k": kind, "s": "p", "c": 0}]))
+
+    def test_consistent_paths_pass(self):
+        got = self.problems({"paths_km": 2.4, "cycling_km": 1.1, "boardwalk_km": 0.2, "has_stairs": True}, {"parks": 1, "km": 2.4})
+        self.assertNotIn("path", got)
+
+    def test_impossible_or_misplaced_figures_are_caught(self):
+        self.assertIn("don't add up", self.problems({"paths_km": 1.0, "cycling_km": 3.0, "boardwalk_km": 0, "has_stairs": False}, {"parks": 1, "km": 1.0}))
+        self.assertIn("differ from the summary", self.problems({"paths_km": 1.0, "cycling_km": 0, "boardwalk_km": 0, "has_stairs": False}, {"parks": 2, "km": 9.0}))
+        self.assertIn("isn't a park", self.problems({"paths_km": 1.0, "cycling_km": 0, "boardwalk_km": 0, "has_stairs": False}, {"parks": 1, "km": 1.0}, kind="road"))
+
+
 class PlausibilityTests(unittest.TestCase):
     def problems(self, trees, prev=None, species=None):
         meta = {**META, "tree_count": len(trees)}
@@ -114,6 +132,28 @@ class PlausibilityTests(unittest.TestCase):
     def test_a_big_swing_in_tree_count_is_caught(self):
         t = (100, 103.83, 1.30, 1, 1.0, "6-9", "street", 100.0, None)
         self.assertIn("since the previous build", self.problems([t], prev={"tree_count": 1000}))
+
+
+class PreviousBuildTests(unittest.TestCase):
+    """A source that quietly failed to download must stop the update, not publish a site without it."""
+
+    def problems(self, meta_extra, prev):
+        t = [(100, 103.83, 1.30, 1, 1.0, "6-9", "street", 100.0, None), (101, 103.84, 1.30, 1, 2.0, "9-12", "street", 200.0, None)]
+        meta = {**META, "tree_count": 2, **meta_extra}
+        return "\n".join(audit.plausibility(make_db(trees=t), meta, {"tree_count": 2, **prev}))
+
+    def test_steady_counts_pass(self):
+        same = {"place_counts": {"road": 100, "trail": 40}, "poi_counts": {"Toilet": 130, "Hawker centre": 120}, "trail_trees": 9000}
+        got = self.problems(same, same)
+        self.assertNotIn("previous update", got)
+
+    def test_a_missing_layer_is_caught(self):
+        prev = {"place_counts": {"road": 100, "trail": 40}, "poi_counts": {"Toilet": 130, "Hawker centre": 120, "Jetty": 5}, "trail_trees": 9000}
+        now = {"place_counts": {"road": 100}, "poi_counts": {"Toilet": 130}, "trail_trees": 0}
+        got = self.problems(now, prev)
+        for expected in ("0 trail places, down from 40", "0 Hawker centre points, down from 120", "0 trees on trails, down from 9000"):
+            self.assertIn(expected, got)
+        self.assertNotIn("Jetty", got, "classes under 10 may come and go")
 
 
 class SourceCheckTests(unittest.TestCase):
