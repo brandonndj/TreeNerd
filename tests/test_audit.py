@@ -97,6 +97,24 @@ class TreeConservationAreaTests(unittest.TestCase):
         self.assertIn("map extent", self.build(bbox=(103.835, 1.29, 103.85, 1.31)))  # misses the tree at 103.83
 
 
+class ParkPathTests(unittest.TestCase):
+    def problems(self, paths, summary, kind="park"):
+        db = make_db()
+        db.execute("""INSERT INTO places (id, kind, slug, name, tree_count, species_count, heritage_count, carbon_kg, top_species, extra)
+                      VALUES (50, ?, 'p', 'P', 0, 0, 0, 0, '[]', ?)""", (kind, json.dumps({"paths": paths})))
+        meta = {**META, "park_paths": summary, "place_counts": {**META["place_counts"], kind: META["place_counts"].get(kind, 0) + 1}}
+        return "\n".join(audit.consistency(db, meta, SEARCH + [{"k": kind, "s": "p", "c": 0}]))
+
+    def test_consistent_paths_pass(self):
+        got = self.problems({"paths_km": 2.4, "cycling_km": 1.1, "boardwalk_km": 0.2, "has_stairs": True}, {"parks": 1, "km": 2.4})
+        self.assertNotIn("path", got)
+
+    def test_impossible_or_misplaced_figures_are_caught(self):
+        self.assertIn("don't add up", self.problems({"paths_km": 1.0, "cycling_km": 3.0, "boardwalk_km": 0, "has_stairs": False}, {"parks": 1, "km": 1.0}))
+        self.assertIn("differ from the summary", self.problems({"paths_km": 1.0, "cycling_km": 0, "boardwalk_km": 0, "has_stairs": False}, {"parks": 2, "km": 9.0}))
+        self.assertIn("isn't a park", self.problems({"paths_km": 1.0, "cycling_km": 0, "boardwalk_km": 0, "has_stairs": False}, {"parks": 1, "km": 1.0}, kind="road"))
+
+
 class PlausibilityTests(unittest.TestCase):
     def problems(self, trees, prev=None, species=None):
         meta = {**META, "tree_count": len(trees)}

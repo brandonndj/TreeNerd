@@ -193,6 +193,7 @@ jobs:
           put "species-$NEXT.json" species.json application/json
           put "trails-$NEXT.geojson" trails.geojson application/geo+json
           put "tca-$NEXT.geojson" tca.geojson application/geo+json
+          put "reserves-$NEXT.geojson" reserves.geojson application/geo+json
 
       - name: Switch the site to the new database
         if: env.PUBLISH == 'true'
@@ -217,6 +218,7 @@ jobs:
           put species.json species.json application/json
           put trails.geojson trails.geojson application/geo+json
           put tca.geojson tca.geojson application/geo+json
+          put reserves.geojson reserves.geojson application/geo+json
           put meta.json meta.json application/json
           put trees.csv.gz trees.csv.gz application/gzip
           put "snapshots/$(date -u +%F)/trees.csv.gz" trees.csv.gz application/gzip

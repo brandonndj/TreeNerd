@@ -42,6 +42,23 @@ the classes it leaves out, so a new kind NParks adds is noticed and can be added
 **A big jump in changes is treated as a data problem.** More than 5% of trees appearing or disappearing
 in one update isn't logged as news. *Why:* that is almost always NParks re-issuing records.
 
+**Sections of one park are one park.** NParks lists some parks in sections ("SBG LC Zone 1 (TNC)", "...
+(Pond Gardens)"). When two or more entries share a name once the section label goes, they're one place;
+a single "Jubilee Park (FCP)" keeps its name, and East Coast Park's Areas A-H, which are named on site,
+stay separate. Old section addresses still open the park.
+
+**Park paths say only what NParks' data supports.** Length open to walking, cycling allowed, boardwalks,
+and "some paths have stairs" when there are any (never "no stairs": the data may be incomplete). No
+wheelchair claims: NParks doesn't define its "wheeling" flag.
+
+**Nature reserves: boundaries and NParks' own words.** The gazette's land lots are merged per reserve.
+The page quotes NParks ("conserved under the Parks and Trees Act") and states no rules or fines, which
+couldn't be confirmed from the Act. Their outline is solid where the conservation areas' is dashed, so
+the two differ without relying on colour.
+
+**On iPhone a card opens at 70% of the screen** (owner's choice): most of it shows, a strip of map stays
+for the place, and the X returns to the map. The weather card folds to one line there; warnings never fold.
+
 **Tree Conservation Areas: pages and outlines, no tree list.** The two areas hold about 129,000 recorded
 trees. Listing or highlighting them would need an index on the trees table, rebuilt every update (about
 0.6 million billed rows a month); the build works out their figures instead and the map draws the

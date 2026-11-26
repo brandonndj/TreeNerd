@@ -271,3 +271,18 @@ test("no page or public file names the owner's account", async () => {
   }
   assert.match(await (await get("/.well-known/security.txt")).text(), /^Contact: https:\/\/t\.me\/treenerd$/m);
 });
+
+test("parks listed in sections: an old section address finds the park and gives its own address", async () => {
+  const d = await getJson("/api/place/park/istana-park-section-a-st999");
+  assert.equal(d.slug, "istana-pk-st528");
+  assert.equal(d.name, "Istana Park");
+  assert.equal((await get("/api/place/park/no-such-park-st000")).status, 404);
+  assert.equal((await get("/api/place/road/istana-park-section-a-st999")).status, 404, "only parks have former addresses");
+});
+
+test("nature reserves: an outline per reserve", async () => {
+  const r = await getJson("/data/reserves.geojson");
+  assert.deepEqual(r.features.map((f) => f.properties.n).sort(),
+    ["Bukit Timah Nature Reserve", "Central Catchment Nature Reserve", "Labrador Nature Reserve", "Sungei Buloh Wetland Reserve"]);
+  assert.ok(r.features.every((f) => /Polygon/.test(f.geometry.type)));
+});

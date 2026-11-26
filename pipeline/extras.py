@@ -91,6 +91,58 @@ def trail_shapes(routes, slugs) -> dict:
     return {"type": "FeatureCollection", "features": feats}
 
 
+# ---------------------------------------------------------------------------------- park paths
+def park_paths(park_feats, park_ids) -> dict[int, dict]:
+    """Paths NParks maps in each park (NParks Tracks): total length of paths open to walking, how much of it
+    allows cycling, boardwalk length, and whether any stairs. A segment belongs to the park its midpoint is
+    in. NParks' "wheeling" flag isn't used: NParks doesn't say what it covers (docs/BACKLOG.md)."""
+    from .build import polygon_join  # avoid a circular import at module load
+    feats = [f for f in load("dgs_nparks_tracks.geojson") if f["geometry"]["type"] in ("LineString", "MultiLineString")]
+    if not feats or not len(park_ids):
+        return {}
+    lines = _lines(feats)
+    mids = shapely.line_interpolate_point(lines, 0.5, normalized=True)
+    j = polygon_join(mids, park_feats, "park paths")
+    out: dict[int, dict] = defaultdict(lambda: {"walk_m": 0.0, "cycle_m": 0.0, "boardwalk_m": 0.0, "stairs": 0})
+    for f, line, k in zip(feats, lines, j):
+        if k < 0:
+            continue
+        p, n = f["properties"], float(shapely.length(line))
+        s = out[int(park_ids[k])]
+        if (p.get("TYPE") or "").strip() == "Staircase":
+            s["stairs"] += 1
+        if (p.get("ALLOW_WALKING") or "").upper() == "Y":
+            s["walk_m"] += n
+            if (p.get("ALLOW_CYCLING") or "").upper() == "Y":
+                s["cycle_m"] += n
+            if (p.get("TYPE") or "").strip() == "Boardwalk/Trail":
+                s["boardwalk_m"] += n
+    log(f"  park paths: {sum(1 for k in j if k >= 0):,} of {len(feats):,} segments in {len(out)} parks")
+    return dict(out)
+
+
+def path_figures(s: dict) -> dict:
+    """What a park page shows, rounded once here so the audit can check the same numbers."""
+    return {"paths_km": round(s["walk_m"] / 1000, 1), "cycling_km": round(s["cycle_m"] / 1000, 1),
+            "boardwalk_km": round(s["boardwalk_m"] / 1000, 1), "has_stairs": s["stairs"] > 0}
+
+
+def nature_reserves() -> list[tuple[dict, str, str]]:
+    """The four gazetted nature reserves (NParks, Nature Reserves Gazette 2005), one outline each: the
+    gazette lists land lots, which are merged per reserve. Items for area_shapes."""
+    lots = defaultdict(list)
+    for f in load("dgs_nature_reserves_gazette.geojson"):
+        name = (f["properties"].get("NAT_RES_NA") or "").strip()
+        if name and f["geometry"]["type"] in ("Polygon", "MultiPolygon"):
+            lots[name].append(shapely.force_2d(shape(f["geometry"])))
+    out = []
+    for name, geoms in sorted(lots.items()):
+        g = shapely.make_valid(shapely.union_all(geoms))
+        out.append(({"type": "Feature", "properties": {}, "geometry": shapely.geometry.mapping(g)}, slugify(name), name))
+    log(f"  nature reserves: {len(out)} ({', '.join(n for _, _, n in out)})")
+    return out
+
+
 def area_shapes(items) -> dict:
     """GeoJSON outlines of areas, for drawing on the map: items are (feature in WGS84, slug, name).
     NParks' boundary as published, with coordinates rounded to 1e-6 degree (about 10 cm), so only

@@ -2,6 +2,20 @@
 
 What changed for people using TreeNerd, newest first. New entries are posted to the [Telegram channel](https://t.me/treenerd) when they go live; entries under "Internal" are for developers and aren't posted.
 
+## 2026-11-26: Nature reserves, park paths, one Botanic Gardens
+
+### Added
+- Nature reserves (arriving with the weekly data update early Monday, Singapore time): switch on "Nature reserves" in the Tree types panel to see the legal boundaries of Singapore's four nature reserves, Central Catchment, Bukit Timah, Sungei Buloh and Labrador. Their park pages show the boundary and say they're conserved under the Parks and Trees Act.
+- Park paths (also from Monday): park pages show how many km of paths NParks maps there and how much allows cycling, plus boardwalks and stairs where there are some.
+
+### Changed
+- On iPhone, a card now opens taller, so you see more of it at once; a strip of map stays above it, and the X takes you back to the map.
+- On iPhone, the weather card is shorter: the temperature, then one line such as "Partly cloudy next 2 h · Heat stress low". Tap it for every reading and where it's from. Lightning warnings, and air quality outside "Normal", always show.
+- From Monday, Singapore Botanic Gardens is one page instead of NParks' four management zones, and parks NParks lists in sections (such as Bishan-Ang Mo Kio Park) are one page each. Old links to a section still open the park.
+
+### Internal
+- Parks: sections of one park are one place (`park_display_names`); their old addresses are kept in `extra.former_slugs` and the Worker finds the park from them. Park paths come from NParks Tracks (already downloaded) and are audited against a new `meta.park_paths` summary. Nature reserve outlines (`reserves.geojson`, per database) come from NParks' Nature Reserves Gazette, a new optional download. Review findings that aren't built yet are kept in `docs/BACKLOG.md`.
+
 ## 2026-11-25: Steadier updates and weather
 
 ### Internal

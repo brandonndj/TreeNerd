@@ -36,10 +36,10 @@ const PLACE_COLUMN: Record<string, string> = {
   road: "road_id", park: "park_id", subzone: "subzone_id", planning_area: "pa_id",
   pcn: "pcn_id", constituency: "ed_id", heritage_road: "hr_id",
 };
-const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson", "tca.geojson"]);
+const R2_PUBLIC = new Set(["trees.pmtiles", "search.json", "species.json", "meta.json", "trees.csv.gz", "changes.json", "trails.geojson", "tca.geojson", "reserves.geojson"]);
 // Files that belong to one database build ("<name>-a.<ext>" / "-b"); see getSlotObject.
 const SLOT_FILES: Record<string, [string, string]> = {
-  "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"], "tca.geojson": ["tca", "geojson"],
+  "species.json": ["species", "json"], "trails.geojson": ["trails", "geojson"], "tca.geojson": ["tca", "geojson"], "reserves.geojson": ["reserves", "geojson"],
 };
 /**
  * Kinds of place that have a page: the column-based ones, plus trails (a tree can be on several) and
@@ -211,7 +211,12 @@ function placeCondition(kind: string) {
 
 async function getPlace(env: Env, kind: string, slug: string) {
   if (!PLACE_KINDS.has(kind) || !SLUG_RE.test(slug)) throw new HttpError(404, "not found");
-  const place = await env.DB.prepare("SELECT * FROM places WHERE kind=? AND slug=?").bind(kind, slug).first();
+  let place = await env.DB.prepare("SELECT * FROM places WHERE kind=? AND slug=?").bind(kind, slug).first();
+  // a park NParks lists in sections is one place now; links to a section's old page find the park
+  if (!place && kind === "park") {
+    place = await env.DB.prepare(`SELECT p.* FROM places p, json_each(p.extra, '$.former_slugs') f
+      WHERE p.kind='park' AND f.value=? LIMIT 1`).bind(slug).first().catch(() => null);
+  }
   if (!place) throw new HttpError(404, "not found");
   return { place, cond: placeCondition(kind) };
 }
@@ -260,7 +265,7 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   return json({
     changes: await placeChanges(env, kind, place.id as number),
     pois: await placePois(env, kind, place.id as number),
-    kind, slug, name: place.name, alt: parseJSON(place.alt, []),
+    kind, slug: place.slug as string, name: place.name, // the park's own address, also when reached by an old one alt: parseJSON(place.alt, []),
     tree_count: place.tree_count, species_count: place.species_count,
     heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
     bbox: parseJSON(place.bbox, null), extra: parseJSON(place.extra, {}),

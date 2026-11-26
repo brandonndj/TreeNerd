@@ -141,3 +141,20 @@ class SpeciesChecklistFallbackTests(unittest.TestCase):
             self.run_fetch(0, fails=True)
         with self.assertRaises(OSError):
             self.run_fetch(500, fails=True)  # a stub, not a real checklist
+
+
+class ParkNameTests(unittest.TestCase):
+    def test_sections_of_one_park_become_one(self):
+        from pipeline.build import park_display_names
+        names = ["Singapore Botanic Gardens LC Zone 1 (TNC)", "Singapore Botanic Gardens LC Arbo/Prc/Pru",
+                 "Bishan-Ang Mo Kio Park (Pond Gardens)", "Bishan-Ang Mo Kio Park (River Plains)",
+                 "Jubilee Park (FCP)", "Hoover Park (Lor Pisang Hijau Playground)", "Pasir Ris Park"]
+        self.assertEqual(park_display_names(names), [
+            "Singapore Botanic Gardens", "Singapore Botanic Gardens", "Bishan-Ang Mo Kio Park", "Bishan-Ang Mo Kio Park",
+            "Jubilee Park (FCP)", "Hoover Park (Lor Pisang Hijau Playground)", "Pasir Ris Park"])
+
+    def test_a_lone_zone_keeps_its_name(self):
+        from pipeline.build import park_display_names
+        self.assertEqual(park_display_names(["Somewhere LC Zone 1 (X)"]), ["Somewhere LC Zone 1 (X)"])
+        # East Coast Park's areas are named areas, not sections: they stay separate
+        self.assertEqual(park_display_names(["East Coast Park Area A", "East Coast Park Area B"]), ["East Coast Park Area A", "East Coast Park Area B"])

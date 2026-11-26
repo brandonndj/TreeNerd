@@ -116,6 +116,9 @@ def main():
     tca = json.loads((OUT / "tca.geojson").read_text()) if (OUT / "tca.geojson").exists() else {"type": "FeatureCollection", "features": []}
     tca["features"] = [f for f in tca["features"] if f["properties"]["s"] in tca_slugs]
     (DEST / "tca.geojson").write_text(json.dumps(tca, separators=(",", ":")))
+    # nature reserve outlines: all four, so the map switch has something to draw
+    reserves = OUT / "reserves.geojson"
+    (DEST / "reserves.geojson").write_text(reserves.read_text() if reserves.exists() else '{"type":"FeatureCollection","features":[]}')
     sdict = json.loads((OUT / "species.json").read_text())
     (DEST / "species.json").write_text(json.dumps({k: v for k, v in sdict.items() if int(k) in species_ids},
                                                   ensure_ascii=False, separators=(",", ":")))
