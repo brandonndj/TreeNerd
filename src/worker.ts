@@ -265,7 +265,8 @@ async function apiPlace(env: Env, kind: string, slug: string) {
   return json({
     changes: await placeChanges(env, kind, place.id as number),
     pois: await placePois(env, kind, place.id as number),
-    kind, slug: place.slug as string, name: place.name, // the park's own address, also when reached by an old one alt: parseJSON(place.alt, []),
+    // slug: the park's own address, also when it was reached by an old section address
+    kind, slug: place.slug as string, name: place.name, alt: parseJSON(place.alt, []),
     tree_count: place.tree_count, species_count: place.species_count,
     heritage_count: place.heritage_count, carbon_kg: place.carbon_kg,
     bbox: parseJSON(place.bbox, null), extra: parseJSON(place.extra, {}),

@@ -565,6 +565,7 @@ test("temperature card: shown near the top with station and distance, hidden wit
 test("place pages: road story, residents, amenities and heritage", async () => {
   const { ctx, page, errors } = await open("/?p=road/orchard-road");
   await panelTitle(page, "Orchard Road");
+  assert.match(await page.textContent("#panel-body .sub"), /乌节路/, "the road's name in another script is shown");
   assert.match(await page.textContent("#panel-body"), /About this road[\s\S]*National Library Board/);
   await ctx.close();
   const area = await open("/?p=planning_area/newton");

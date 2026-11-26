@@ -286,3 +286,9 @@ test("nature reserves: an outline per reserve", async () => {
     ["Bukit Timah Nature Reserve", "Central Catchment Nature Reserve", "Labrador Nature Reserve", "Sungei Buloh Wetland Reserve"]);
   assert.ok(r.features.every((f) => /Polygon/.test(f.geometry.type)));
 });
+
+test("place replies keep alternate names (roads have names in other scripts)", async () => {
+  const d = await getJson("/api/place/road/orchard-road");
+  assert.ok(Array.isArray(d.alt) && d.alt.includes("乌节路"), JSON.stringify(d.alt));
+  assert.equal(d.slug, "orchard-road");
+});
